@@ -12,20 +12,47 @@ Dự án này thực hiện nhận dạng bất thường trong dữ liệu hìn
 
 ## Cài Đặt
 
-1. Clone hoặc tải về dự án này:
-   ```bash
-   https://github.com/taitruong256/Abnormal-detection.git
-   ```
+### 1. Clone hoặc tải về dự án này:
+```bash
+https://github.com/taitruong256/Abnormal-detection.git 
+cd Abnormal-detection
+```
 
-2. Cài đặt các thư viện cần thiết bằng pip:
-    ```bash
-    pip install -r requirements.txt
-    ```
-3. Để chạy chương trình, sử dụng lệnh sau trong terminal:
+### 2. Tạo Môi Trường Ảo
+Mở terminal hoặc command prompt và thực hiện:
 
+Tạo Môi Trường Ảo: Sử dụng lệnh sau để tạo môi trường ảo. Thay myenv bằng tên bạn muốn đặt cho môi trường của mình.
+```bash
+python -m venv myenv
+```
+
+### 3. Kích Hoạt Môi Trường Ảo
+Sau khi tạo xong, bạn cần kích hoạt môi trường ảo:
+
+- Trên Windows:
     ```bash
-    python main.py
+    myenv\Scripts\activate
     ```
+- Trên macOS/Linux:
+    ```bash
+    source myenv/bin/activate
+    ```
+Khi môi trường ảo được kích hoạt, bạn sẽ thấy tên môi trường xuất hiện ở đầu dòng lệnh.
+
+### 4. Cài đặt các thư viện cần thiết bằng pip:
+```bash
+pip install -r requirements.txt
+```
+### 5. Để chạy chương trình, sử dụng lệnh sau trong terminal:
+```bash
+python main.py
+```
+
+### 6. Vô Hiệu Hóa Môi Trường Ảo
+Khi bạn đã hoàn tất làm việc trong môi trường ảo, bạn có thể vô hiệu hóa nó bằng lệnh:
+```bash
+deactivate
+```
 
 ## Các Tham Số Có Thể Điều Chỉnh
 Bạn có thể điều chỉnh một số tham số trong tệp main.py để phù hợp với nhu cầu của mình, chẳng hạn như:
@@ -60,3 +87,8 @@ OMEGA_T: Ngưỡng xác suất nhận dạng bất thường. Nếu một mẫu 
 Đảm bảo rằng bạn đã cấu hình đúng đường dẫn tới dữ liệu nếu có yêu cầu.
 
 Để tải mô hình tốt nhất, bạn cần đảm bảo rằng tệp mô hình đã được lưu trữ.
+
+
+
+
+
