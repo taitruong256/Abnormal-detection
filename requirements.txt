@@ -1,0 +1,14 @@
+numpy==1.25.2
+pandas==2.2.2
+matplotlib==3.5.1
+plotly==5.6.0
+opencv-python==4.10.0
+pydicom==2.4.4
+pylibjpeg==2.0.1
+tqdm==4.64.0
+Pillow==9.0.1
+joblib==1.1.0
+scikit-learn==1.0.2
+torch==2.4.1+cu118
+torchvision==0.19.1+cpu
+libmr==0.1.8
