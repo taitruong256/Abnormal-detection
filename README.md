@@ -14,7 +14,8 @@ Dự án này thực hiện nhận dạng bất thường trong dữ liệu hìn
 
 ### 1. Clone hoặc tải về dự án này:
 ```bash
-https://github.com/taitruong256/Abnormal-detection.git 
+git clone https://github.com/taitruong256/Abnormal-detection.git 
+   cd Abnormal-detection
 cd Abnormal-detection
 ```
 
