@@ -6,9 +6,7 @@ from sklearn.metrics import accuracy_score, confusion_matrix, f1_score
 from lib.Training.loss_functions import central_custom_loss, decentral_custom_loss
 from lib.Openset.meta_recognition import build_weibull_model, calculate_outlier_probability
 
-INPUT_SHAPE = 256 
-
-def evaluate_vae(model, device, val_close_loader, val_open_loader, latent_dim, beta, lambda_):
+def evaluate_vae(model, device, val_close_loader, val_open_loader, latent_dim, beta, lambda_, input_shape):
     model.eval()
 
     total_loss, total_reconstruction_loss, total_kl_divergence = 0.0, 0.0, 0.0
@@ -27,7 +25,7 @@ def evaluate_vae(model, device, val_close_loader, val_open_loader, latent_dim, b
             mean, log_var, z, data_reconstructions = model(data)
             
             loss, reconstruction_loss, kl_divergence, centralization_loss = central_custom_loss(
-                beta, data, data_reconstructions, mean, log_var, z, lambda_, latent_dim
+                beta, data, data_reconstructions, mean, log_var, z, lambda_, latent_dim, input_shape
             )
 
             total_reconstruction_loss += reconstruction_loss.item()
@@ -45,7 +43,7 @@ def evaluate_vae(model, device, val_close_loader, val_open_loader, latent_dim, b
             mean, log_var, z, data_reconstructions = model(data)
             
             loss, reconstruction_loss, kl_divergence, decentralization_loss = decentral_custom_loss(
-                beta, data, data_reconstructions, mean, log_var, z, lambda_, latent_dim
+                beta, data, data_reconstructions, mean, log_var, z, lambda_, latent_dim, input_shape
             )
 
             total_decentralization_loss_open += decentralization_loss.item()
@@ -60,7 +58,7 @@ def evaluate_vae(model, device, val_close_loader, val_open_loader, latent_dim, b
     return avg_loss, avg_reconstruction_loss, avg_kl_divergence, avg_centralization_loss_close, avg_decentralization_loss_open
 
 
-def evaluate_weibull(vae, device, all_latent_vectors, mean_vector, open_loader, num_classes, latent_dim, tail_size, threshold_list=np.arange(0.05, 1, 0.05)):
+def evaluate_weibull(vae, device, all_latent_vectors, mean_vector, open_loader, num_classes, latent_dim, tail_size):
     vae.eval()
     true_labels = []
     pred_labels = []
@@ -86,6 +84,7 @@ def evaluate_weibull(vae, device, all_latent_vectors, mean_vector, open_loader, 
     best_pred_labels = np.zeros_like(true_labels)
 
     # Tìm ngưỡng với F1 score tốt nhất
+    threshold_list = np.arange(0.05, 1, 0.05)
     for threshold in threshold_list:
         pred_labels = (outlier_probs >= threshold).astype(int)
         f1 = f1_score(true_labels, pred_labels, average=None).mean()

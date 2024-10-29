@@ -12,6 +12,7 @@ import joblib
 import sklearn
 import torch
 import torchvision
+import kagglehub
 
 # Check and return the version of each package
 versions = {
@@ -27,7 +28,8 @@ versions = {
     'joblib': joblib.__version__,
     'scikit-learn': sklearn.__version__,
     'torch': torch.__version__,
-    'torchvision': torchvision.__version__
+    'torchvision': torchvision.__version__,
+    'kagglehub': kagglehub.__version__,
 }
 
 print(versions)

@@ -37,7 +37,7 @@ def plot_metrics(val_history, NUM_EPOCHS, output_dir, filename='training_metrics
     plt.tight_layout()
     output_path = os.path.join(output_dir, filename)
     plt.savefig(output_path)  # Lưu biểu đồ thành file 
-    print(f'Plot saved at: {output_path}')
+    print(f'Metrics plot saved at: {output_path}')
     plt.close()  
     
     
@@ -138,13 +138,13 @@ def plot_outlier_probability_histogram(closed_set_probabilities, open_set_probab
     plt.close()
     
     
-def evaluate_and_plot_samples(df, vae, mean_vector, weibull_model, NUM_CLASSES, OMEGA_T, device, output_dir):
+def evaluate_and_plot_samples(df, vae, mean_vector, weibull_model, NUM_CLASSES, OMEGA_T, device, output_dir, input_shape):
     # Lấy mẫu dữ liệu: 10 ảnh không bị ung thư và 10 ảnh bị ung thư
     non_cancer_sample = df[df.cancer == 0].sample(10)
     cancer_sample = df[df.cancer == 1].sample(10)
     sample_df = pd.concat([non_cancer_sample, cancer_sample])
 
-    sample_dataset = BreastCancerDataset(sample_df)
+    sample_dataset = BreastCancerDataset(sample_df, input_shape)
     sample_loader = DataLoader(sample_dataset, batch_size=16, shuffle=False)
 
     with torch.no_grad():
