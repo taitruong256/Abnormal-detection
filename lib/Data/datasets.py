@@ -3,14 +3,13 @@ from torch.utils.data import Dataset
 from torchvision import transforms
 from PIL import Image
 
-INPUT_SHAPE = 256
-
 class BreastCancerDataset(Dataset):
-    def __init__(self, df):
+    def __init__(self, df, input_shape):
         self.df = df
+        self.input_shape = input_shape
         
         self.transform = transforms.Compose([
-            transforms.Resize((INPUT_SHAPE, INPUT_SHAPE)),
+            transforms.Resize((self.input_shape, self.input_shape)),
             transforms.ToTensor()
         ])
 
@@ -27,6 +26,6 @@ class BreastCancerDataset(Dataset):
         return img_tensor, label_tensor
 
     def read_and_resize_image(self, png_path):
-        img = Image.open(png_path).convert('L')  # Convert to grayscale
+        img = Image.open(png_path).convert('L') 
         img_tensor = self.transform(img) 
         return img_tensor

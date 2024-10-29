@@ -12,3 +12,4 @@ scikit-learn==1.0.2
 torch==2.4.1
 torchvision==0.19.1
 libmr==0.1.9
+kagglehub==0.3.3

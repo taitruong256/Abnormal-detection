@@ -2,12 +2,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-INPUT_SHAPE = 256
-VARIANCE = 0.25
-
 class Sampling(nn.Module):
-    def forward(self, mean, log_var):
-        variance_tensor = torch.tensor(VARIANCE, device=mean.device)
+    def forward(self, mean, log_var, variance):
+        variance_tensor = torch.tensor(variance, device=mean.device)
         epsilon = torch.normal(mean=torch.zeros_like(mean), std=torch.sqrt(variance_tensor))
         return mean + torch.exp(0.5 * log_var) * epsilon
     
@@ -53,7 +50,9 @@ class decoder_block(nn.Module):
         return x 
     
 class VAE_Unet(nn.Module):
-    def __init__(self, latent_dim):
+    def __init__(self, input_shape, variance, latent_dim):
+        self.input_shape = input_shape
+        self.variance = variance 
         super(VAE_Unet, self).__init__()
         
         self.encoder_block1 = encoder_block(1, 64)
@@ -63,11 +62,11 @@ class VAE_Unet(nn.Module):
         
         self.bottleneck = conv_block(512, 1024)
         
-        self.fc_mean = nn.Linear(1024 * (INPUT_SHAPE // 16) * (INPUT_SHAPE // 16), latent_dim)
-        self.fc_log_var = nn.Linear(1024 * (INPUT_SHAPE // 16) * (INPUT_SHAPE // 16), latent_dim)
+        self.fc_mean = nn.Linear(1024 * (self.input_shape // 16) * (self.input_shape // 16), latent_dim)
+        self.fc_log_var = nn.Linear(1024 * (self.input_shape // 16) * (self.input_shape // 16), latent_dim)
         
         self.sampling = Sampling()
-        self.fc_z = nn.Linear(latent_dim, 1024 * (INPUT_SHAPE // 16) * (INPUT_SHAPE // 16))
+        self.fc_z = nn.Linear(latent_dim, 1024 * (self.input_shape // 16) * (self.input_shape // 16))
         
         self.decoder_block4 = decoder_block(1024, 512)
         self.decoder_block3 = decoder_block(512, 256)
@@ -90,7 +89,7 @@ class VAE_Unet(nn.Module):
 
     def decode(self, z, x1, x2, x3, x4):
         z1 = self.fc_z(z)
-        z1 = z1.view(z.size(0), 1024, INPUT_SHAPE // 16, INPUT_SHAPE // 16) 
+        z1 = z1.view(z.size(0), 1024, self.input_shape // 16, self.input_shape // 16) 
         d4 = self.decoder_block4(x4, z1)
         d3 = self.decoder_block3(x3, d4)
         d2 = self.decoder_block2(x2, d3)
@@ -99,6 +98,6 @@ class VAE_Unet(nn.Module):
 
     def forward(self, x):
         mean, log_var, x1, x2, x3, x4 = self.encode(x)
-        z = self.tanh(self.sampling(mean, log_var))  
+        z = self.tanh(self.sampling(mean, log_var, self.variance))  
         d1 = self.decode(z, x1, x2, x3, x4)
         return mean, log_var, z, d1

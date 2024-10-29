@@ -2,7 +2,7 @@ import torch
 from tqdm import tqdm
 from lib.Training.loss_functions import central_custom_loss, decentral_custom_loss
 
-def train_vae(model, device, train_close_loader, train_open_loader, optimizer, beta, lambda_, latent_dim):
+def train_vae(model, device, train_close_loader, train_open_loader, optimizer, beta, lambda_, latent_dim, input_shape):
     model.train()
 
     # Vector tổng cho các latent vector
@@ -16,7 +16,7 @@ def train_vae(model, device, train_close_loader, train_open_loader, optimizer, b
         
         data, labels = data.to(device), labels.to(device)
         mean, log_var, z, data_reconstructions = model(data)
-        total_loss, recon_loss, kl_loss, central_loss = central_custom_loss(beta, data, data_reconstructions, mean, log_var, z, lambda_, latent_dim)
+        total_loss, recon_loss, kl_loss, central_loss = central_custom_loss(beta, data, data_reconstructions, mean, log_var, z, lambda_, latent_dim, input_shape)
         optimizer.zero_grad()
         total_loss.backward()
         optimizer.step()
@@ -37,7 +37,7 @@ def train_vae(model, device, train_close_loader, train_open_loader, optimizer, b
 #     for batch_idx, (data, labels) in enumerate(progress_bar_open):
 #         data, labels = data.to(device), labels.to(device)
 #         mean, log_var, z, data_reconstructions = model(data)
-#         total_loss, recon_loss, kl_loss, decentral_loss = decentral_custom_loss(beta, data, data_reconstructions, mean, log_var, z, lambda_, latent_dim)
+#         total_loss, recon_loss, kl_loss, decentral_loss = decentral_custom_loss(beta, data, data_reconstructions, mean, log_var, z, lambda_, latent_dim, input_shape)
 #         optimizer.zero_grad()
 #         total_loss.backward()
 #         optimizer.step()
