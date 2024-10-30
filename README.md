@@ -45,7 +45,7 @@ pip install -r requirements.txt
 ```
 ### 5. Để chạy chương trình, sử dụng lệnh sau trong terminal:
 ```bash
-python main.py
+python main.py --is_train=True --latent_dim=640 --num_epochs=10 --beta=0.1 --lambda_=0.01 --learning_rate=0.005 --batch_size=16 --variance=0.25 --num_classes=1 --input_shape=32 --num_examples=1000 --tail_size=0.05 --loss_type recon
 ```
 
 ### 6. Vô Hiệu Hóa Môi Trường Ảo
@@ -80,8 +80,6 @@ INPUT_SHAPE: Kích thước đầu vào cho mô hình (chiều cao = chiều r�
 NUM_EXAMPLES: Tổng số ví dụ trong tập dữ liệu.
 
 TAIL_SIZE: Kích thước đuôi (dùng để huấn luyện Weibull model xác định bất thường).
-
-OMEGA_T: Ngưỡng xác suất nhận dạng bất thường. Nếu một mẫu có xác suất thuộc ngoài tập huấn luyện \leq OMEGA_T thì được xác định là bình thường. Ngược lại là bất thường. 
 
 ## Ghi Chú
 Đảm bảo rằng bạn đã cấu hình đúng đường dẫn tới dữ liệu nếu có yêu cầu.
