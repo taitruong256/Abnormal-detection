@@ -8,7 +8,7 @@ BATCH_SIZE = 1
 VARIANCE = 0.25 
 NUM_CLASSES = 1 
 INPUT_SHAPE = 32 
-NUM_EXAMPLES = 10000 
+NUM_EXAMPLES = 100 
 TAIL_SIZE = 0.05 
 OMEGA_T = 0.1
 
@@ -16,7 +16,7 @@ import os
 import torch
 import numpy as np  
 
-from lib.Data.load_data import load_data, download_and_move_data
+from lib.Data.load_data import load_and_concatenate_datasets, download_kaggle_dataset, split_data
 from lib.Model.model import VAE_Unet
 from lib.Training.train import train_vae
 from lib.Openset.meta_recognition import build_weibull_model
@@ -24,8 +24,14 @@ from lib.Training.evaluate import evaluate_vae, evaluate_weibull
 from lib.Utils.visualization import plot_metrics, reduce_and_visualize_latent_space, calculate_and_plot_outlier_probabilities, evaluate_and_plot_samples
 
 if __name__ == "__main__":
-    download_and_move_data("taitruong256/cancer7", "lib/Data/")
-    df, train_loader, train_open_loader, train_close_loader, val_loader, val_open_loader, val_close_loader = load_data(BATCH_SIZE, INPUT_SHAPE)
+    dataset_names = ["taitruong270/cancer1", "taitruong270/cancer2", "taitruong270/cancer3", 
+                 "taitruong270/cancer4", "taitruong270/cancer5", "taitruong270/cancer6"]
+    dataset_paths = [download_kaggle_dataset(name) for name in dataset_names]
+    df = load_and_concatenate_datasets(dataset_paths)
+    df = df.head(NUM_EXAMPLES)
+    print("Total records in combined dataset:", len(df))
+    
+    train_loader, train_open_loader, train_close_loader, val_loader, val_open_loader, val_close_loader = split_data(df, BATCH_SIZE, INPUT_SHAPE)
 
     print('Training set size (non-cancer): ', len(train_close_loader))
     print('Training set size (cancer): ', len(train_open_loader))
@@ -93,5 +99,4 @@ if __name__ == "__main__":
     calculate_and_plot_outlier_probabilities(val_loader, vae, mean_vector, weibull_model, NUM_CLASSES, device, output_dir)
     evaluate_and_plot_samples(df, vae, mean_vector, weibull_model, NUM_CLASSES, OMEGA_T, device, output_dir, INPUT_SHAPE)
         
-
-    print("Finished running.")
+    print("Running finished.")

@@ -46,11 +46,13 @@ def reduce_and_visualize_latent_space(val_loader, vae, INPUT_SHAPE, device, outp
     latent_vectors = []
     
     with torch.no_grad():
-        for x_batch, y_batch in tqdm(val_loader, desc="Visualize latent space", leave=False):
+        progress_bar_close = tqdm(val_loader, desc="Visualizing latent space", leave=False)
+        for batch_idx, (x_batch, y_batch) in enumerate(progress_bar_close):
             x_batch, y_batch = x_batch.to(device), y_batch.to(device)
             _, _, z_batch, x_recon = vae(x_batch)
             labels.append(y_batch.cpu().detach().numpy())
             latent_vectors.append(z_batch.cpu().detach().numpy())
+            progress_bar_close.set_postfix(batch=batch_idx+1)
     
     labels = np.concatenate(labels, axis=0)
     latent_vectors = np.concatenate(latent_vectors, axis=0)
@@ -102,7 +104,8 @@ def calculate_and_plot_outlier_probabilities(val_loader, vae, mean_vector, weibu
     open_set_probabilities = []
 
     with torch.no_grad():
-        for x_batch, y_batch in tqdm(val_loader, desc="Calculating Outlier Probabilities", leave=False):
+        progress_bar_close = tqdm(val_loader, desc="Calculating Outlier Probabilities", leave=False)
+        for batch_idx, (x_batch, y_batch) in enumerate(progress_bar_close):
             x_batch, y_batch = x_batch.to(device), y_batch.to(device)
             _, _, z_batch, _ = vae(x_batch)
             
@@ -114,6 +117,7 @@ def calculate_and_plot_outlier_probabilities(val_loader, vae, mean_vector, weibu
                     closed_set_probabilities.append(min_probability)
                 else:
                     open_set_probabilities.append(min_probability)
+            progress_bar_close.set_postfix(batch=batch_idx+1)
     
     plot_outlier_probability_histogram(closed_set_probabilities, open_set_probabilities, output_dir)
 
@@ -140,8 +144,9 @@ def plot_outlier_probability_histogram(closed_set_probabilities, open_set_probab
     
 def evaluate_and_plot_samples(df, vae, mean_vector, weibull_model, NUM_CLASSES, OMEGA_T, device, output_dir, input_shape):
     # Lấy mẫu dữ liệu: 10 ảnh không bị ung thư và 10 ảnh bị ung thư
-    non_cancer_sample = df[df.cancer == 0].sample(10)
-    cancer_sample = df[df.cancer == 1].sample(10)
+    non_cancer_sample = df[df.cancer == 0].sample(min(10, len(df[df.cancer == 0])), replace=False)
+    cancer_sample = df[df.cancer == 1].sample(min(10, len(df[df.cancer == 1])), replace=False)
+
     sample_df = pd.concat([non_cancer_sample, cancer_sample])
 
     sample_dataset = BreastCancerDataset(sample_df, input_shape)
@@ -156,7 +161,8 @@ def evaluate_and_plot_samples(df, vae, mean_vector, weibull_model, NUM_CLASSES, 
 
 
 def plot_image_comparison(x_batch, y_batch, z_batch, reconstructed_img, mean_vector, weibull_model, NUM_CLASSES, OMEGA_T, output_dir):
-    for index, (x, y, z, recon_img) in enumerate(zip(x_batch, y_batch, z_batch, reconstructed_img), start=1):
+    index = 1 
+    for x, y, z, recon_img in zip(x_batch, y_batch, z_batch, reconstructed_img):
         z = z.cpu().detach().numpy()
         reconstruction_loss = torch.norm(recon_img - x, p=2) ** 2 / (x.size(-1) * x.size(-2))
 
@@ -200,5 +206,6 @@ def plot_image_comparison(x_batch, y_batch, z_batch, reconstructed_img, mean_vec
         save_path = os.path.join(output_dir, f'sample_result_{index}.png')
         plt.savefig(save_path)
         print(f'Image saved at: {save_path}')
+        index+=1 
 
         plt.close()  
