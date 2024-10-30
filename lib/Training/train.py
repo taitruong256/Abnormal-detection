@@ -26,7 +26,6 @@ def train_vae(model, device, train_close_loader, train_open_loader, optimizer, b
         all_latent_vectors_close.append(z.detach().cpu())
         
         progress_bar_close.set_postfix(total_loss=total_loss.item(), batch=batch_idx+1)
-        break 
 
     # Tính vector trung bình của z cho tập đóng
     mean_vector_close = total_z_sum_close / total_samples_close 
