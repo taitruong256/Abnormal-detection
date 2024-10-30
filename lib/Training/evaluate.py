@@ -3,20 +3,15 @@ import numpy as np
 from tqdm import tqdm
 from sklearn.metrics import accuracy_score, confusion_matrix, f1_score
 
-from lib.Training.loss_functions import central_custom_loss, decentral_custom_loss
+from lib.Training.loss_functions import reconstruction_loss 
 from lib.Openset.meta_recognition import build_weibull_model, calculate_outlier_probability
 
-def evaluate_vae(model, device, val_close_loader, val_open_loader, latent_dim, beta, lambda_, input_shape):
+def evaluate_vae(model, device, val_close_loader, val_open_loader, latent_dim, beta, lambda_, input_shape, loss_type):
     model.eval()
 
     total_loss, total_reconstruction_loss, total_kl_divergence = 0.0, 0.0, 0.0
-    total_samples = 0
-
-    total_centralization_loss_close = 0.0
-    total_samples_close = 0
-
+    total_samples, total_samples_close, total_samples_open = 0, 0, 0
     total_decentralization_loss_open = 0.0
-    total_samples_open = 0
 
     # Đánh giá trên tập close (central loss)
     with torch.no_grad():
@@ -24,38 +19,43 @@ def evaluate_vae(model, device, val_close_loader, val_open_loader, latent_dim, b
             data, labels = data.to(device), labels.to(device)
             mean, log_var, z, data_reconstructions = model(data)
             
-            loss, reconstruction_loss, kl_divergence, centralization_loss = central_custom_loss(
-                beta, data, data_reconstructions, mean, log_var, z, lambda_, latent_dim, input_shape
-            )
+            # Tính các hàm loss tách biệt để đánh giá
+            recon_loss = reconstruction_loss(data, data_reconstructions, input_shape)
+            kl_divergence = -0.5 * torch.sum(1 + log_var - mean.pow(2) - log_var.exp()) / latent_dim
+            if loss_type == "recon":
+                loss = recon_loss
+            elif loss_type == 'recon_kld' or loss_type=='recon_kld_decentral':
+                loss = recon_loss + kl_divergence
 
-            total_reconstruction_loss += reconstruction_loss.item()
+            total_reconstruction_loss += recon_loss.item()
             total_kl_divergence += kl_divergence.item()
             total_loss += loss.item()
             total_samples += len(labels)
-
-            total_centralization_loss_close += centralization_loss.item()
             total_samples_close += len(labels)
 
     # Đánh giá trên tập open (decentral loss)
-    with torch.no_grad():
-        for data, labels in tqdm(val_open_loader, desc="Evaluating VAE (open dataset)", leave=False):
-            data, labels = data.to(device), labels.to(device)
-            mean, log_var, z, data_reconstructions = model(data)
-            
-            loss, reconstruction_loss, kl_divergence, decentralization_loss = decentral_custom_loss(
-                beta, data, data_reconstructions, mean, log_var, z, lambda_, latent_dim, input_shape
-            )
-
-            total_decentralization_loss_open += decentralization_loss.item()
-            total_samples_open += len(labels)
+    if loss_type == "recon_kld_decentral":
+        with torch.no_grad():
+            for data, labels in tqdm(val_open_loader, desc="Evaluating VAE (open dataset)", leave=False):
+                data, labels = data.to(device), labels.to(device)
+                mean, log_var, z, data_reconstructions = model(data)
+                
+                recon_loss = reconstruction_loss(data, data_reconstructions, input_shape)
+                decentral_loss = latent_dim - torch.sum(torch.bmm(z.unsqueeze(1), z.unsqueeze(2))) / z.size(0)
+                loss = decentral_loss * lambda_
+                
+                total_reconstruction_loss += recon_loss.item()
+                total_loss += loss.item()
+                total_decentralization_loss_open += decentral_loss.item()
+                total_samples += len(labels)
+                total_samples_open += len(labels)
     
     avg_reconstruction_loss = total_reconstruction_loss / total_samples if total_samples > 0 else 0
     avg_kl_divergence = total_kl_divergence / total_samples if total_samples > 0 else 0
     avg_loss = total_loss / total_samples if total_samples > 0 else 0
-    avg_centralization_loss_close = total_centralization_loss_close / total_samples_close if total_samples_close > 0 else 0
     avg_decentralization_loss_open = total_decentralization_loss_open / total_samples_open if total_samples_open > 0 else 0
 
-    return avg_loss, avg_reconstruction_loss, avg_kl_divergence, avg_centralization_loss_close, avg_decentralization_loss_open
+    return avg_loss, avg_reconstruction_loss, avg_kl_divergence, avg_decentralization_loss_open
 
 
 def evaluate_weibull(vae, device, all_latent_vectors, mean_vector, open_loader, num_classes, latent_dim, tail_size):

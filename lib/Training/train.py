@@ -1,8 +1,8 @@
 import torch 
 from tqdm import tqdm
-from lib.Training.loss_functions import central_custom_loss, decentral_custom_loss
+from lib.Training.loss_functions import reconstruction_loss, recon_loss_with_kl, recon_loss_with_decentralization
 
-def train_vae(model, device, train_close_loader, train_open_loader, optimizer, beta, lambda_, latent_dim, input_shape):
+def train_vae(model, device, train_close_loader, train_open_loader, optimizer, beta, lambda_, latent_dim, input_shape, loss_type):
     model.train()
 
     # Vector tổng cho các latent vector
@@ -16,7 +16,11 @@ def train_vae(model, device, train_close_loader, train_open_loader, optimizer, b
         
         data, labels = data.to(device), labels.to(device)
         mean, log_var, z, data_reconstructions = model(data)
-        total_loss, recon_loss, kl_loss, central_loss = central_custom_loss(beta, data, data_reconstructions, mean, log_var, z, lambda_, latent_dim, input_shape)
+        if loss_type == "recon":
+            total_loss = reconstruction_loss(data, data_reconstructions, input_shape)
+        elif loss_type == "recon_kld" or loss_type == "recon_kld_decentral":
+            total_loss = recon_loss_with_kl(beta, data, data_reconstructions, input_shape, mean, log_var, latent_dim)
+
         optimizer.zero_grad()
         total_loss.backward()
         optimizer.step()
@@ -31,17 +35,18 @@ def train_vae(model, device, train_close_loader, train_open_loader, optimizer, b
     mean_vector_close = total_z_sum_close / total_samples_close 
     mean_vector_close = mean_vector_close.detach().cpu().numpy()
 
-#     # Huấn luyện trên tập open (decentral loss)
-#     progress_bar_open = tqdm(train_open_loader, desc="Training (opened dataset)", leave=False)
-#     for batch_idx, (data, labels) in enumerate(progress_bar_open):
-#         data, labels = data.to(device), labels.to(device)
-#         mean, log_var, z, data_reconstructions = model(data)
-#         total_loss, recon_loss, kl_loss, decentral_loss = decentral_custom_loss(beta, data, data_reconstructions, mean, log_var, z, lambda_, latent_dim, input_shape)
-#         optimizer.zero_grad()
-#         total_loss.backward()
-#         optimizer.step()
+    # Huấn luyện trên tập open nếu là decentral loss
+    if loss_type == "recon_kld_decentral":
+        progress_bar_open = tqdm(train_open_loader, desc="Training (opened dataset)", leave=False)
+        for batch_idx, (data, labels) in enumerate(progress_bar_open):
+            data, labels = data.to(device), labels.to(device)
+            mean, log_var, z, data_reconstructions = model(data)
+            total_loss = recon_loss_with_decentralization(data, data_reconstructions, input_shape, z, lambda_, latent_dim)
+            optimizer.zero_grad()
+            total_loss.backward()
+            optimizer.step()
     
-#         progress_bar_open.set_postfix(total_loss=total_loss.item(), batch=batch_idx+1)
+        progress_bar_open.set_postfix(total_loss=total_loss.item(), batch=batch_idx+1)
     
     all_latent_vectors_close = torch.cat(all_latent_vectors_close, dim=0).cpu().numpy()
     return all_latent_vectors_close, mean_vector_close

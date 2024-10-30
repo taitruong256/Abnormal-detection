@@ -19,14 +19,13 @@ def plot_metrics(val_history, NUM_EPOCHS, output_dir, filename='training_metrics
         ('Total Loss', 'Test Total Loss', 0, 'blue'),
         ('Reconstruction Loss', 'Test Reconstruction Loss', 1, 'blue'),
         ('KL Divergence', 'Test KL Divergence', 2, 'blue'),
-        ('Centralization Loss (Non-cancer)', 'Test Centralization Loss (Non-cancer)', 3, 'orange'),
-        ('Decentralization Loss (Cancer)', 'Test Decentralization Loss (Cancer)', 4, 'red'),
-        ('Open-set Recognition Accuracy', 'Test Open-set Recognition Accuracy', 5, 'green'),
-        ('F1 Score', 'Test F1 Score', 6, 'green')
+        ('Decentralization Loss (Cancer)', 'Test Decentralization Loss (Cancer)', 3, 'red'),
+        ('Open-set Recognition Accuracy', 'Test Open-set Recognition Accuracy', 4, 'green'),
+        ('F1 Score', 'Test F1 Score', 5, 'green')
     ]
     
     for i, (title, label, idx, color) in enumerate(metrics):
-        plt.subplot(7, 1, i+1)
+        plt.subplot(6, 1, i+1)
         plt.plot(epochs, [val_results[idx] for val_results in val_history], label=label, color=color)
         plt.title(title)
         plt.xlabel('Epochs')
