@@ -49,7 +49,7 @@ if __name__ == "__main__":
     best_f1_open = 0.0
     train_history = []
     val_history = []
-    best_model_path = os.path.join(os.getcwd(), 'lib', 'data', 'best_model.pth')
+    best_model_path = os.path.join(os.getcwd(), 'lib', 'Data', 'best_model.pth')
 
     if IS_TRAIN:
         for epoch in range(NUM_EPOCHS):
