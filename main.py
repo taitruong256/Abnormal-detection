@@ -47,10 +47,9 @@ if __name__ == "__main__":
     optimizer = torch.optim.SGD(vae.parameters(), lr=LEARNING_RATE, momentum=0.9)
     
     best_f1_open = 0.0
-    best_model_path = r'lib\data\best_model.pth'
-
     train_history = []
     val_history = []
+    best_model_path = os.path.join(os.getcwd(), 'lib', 'data', 'best_model.pth')
 
     if IS_TRAIN:
         for epoch in range(NUM_EPOCHS):
