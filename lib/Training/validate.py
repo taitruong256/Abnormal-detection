@@ -44,7 +44,7 @@ def validate(Dataset, model, criterion, epoch, metrics_logger, device, save_path
     top1 = AverageMeter()
 
     # confusion matrix
-    confusion = ConfusionMeter(model.module.num_classes, normalized=True)
+    confusion = ConfusionMeter(model.num_classes, normalized=True)
 
     # switch to evaluate mode
     model.eval()
@@ -97,8 +97,8 @@ def validate(Dataset, model, criterion, epoch, metrics_logger, device, save_path
             # our normalized losses back to un-normalized values.
             # For the KLD this also means the reported loss is not scaled by beta, to allow for a fair comparison
             # across potential weighting terms.
-            class_losses.update(class_loss.item() * model.module.num_classes, inp.size(0))
-            kld_losses.update(kld_loss.item() * model.module.latent_dim, inp.size(0))
+            class_losses.update(class_loss.item() * model.num_classes, inp.size(0))
+            kld_losses.update(kld_loss.item() * model.latent_dim, inp.size(0))
             recon_losses_nat.update(recon_loss.item() * inp.size()[1:].numel(), inp.size(0))
             losses.update((class_loss + recon_loss + kld_loss).item(), inp.size(0))
 
@@ -107,10 +107,10 @@ def validate(Dataset, model, criterion, epoch, metrics_logger, device, save_path
             # expensive calculations of the autoregressive model's generation.
             if i == (len(Dataset.val_loader) - 1) and epoch % args.visualization_epoch == 0 and (epoch > 0):
                 # generation
-                gen = model.module.generate()
+                gen = model.generate()
 
                 if args.autoregression:
-                    gen = model.module.pixelcnn.generate(gen)
+                    gen = model.pixelcnn.generate(gen)
                 visualize_image_grid(gen, None, epoch + 1, 'generation_snapshot', save_path)
 
             # Print progress
@@ -139,28 +139,5 @@ def validate(Dataset, model, criterion, epoch, metrics_logger, device, save_path
     if (epoch + 1) % args.epochs == 0 and epoch > 0:
         # visualize the confusion matrix
         visualize_confusion(None, epoch + 1, confusion.value(), Dataset.class_to_idx, save_path)
-
-        # If we are in a continual learning scenario, also use the confusion matrix to extract base and new precision.
-        if args.incremental_data:
-            prec1_base = 0.0
-            prec1_new = 0.0
-            # this has to be + 1 because the number of initial tasks is always one less than the amount of classes
-            # i.e. 1 task is 2 classes etc.
-            for c in range(args.num_base_tasks + 1):
-                prec1_base += confusion.value()[c][c]
-            prec1_base = prec1_base / (args.num_base_tasks + 1)
-
-            # For the first task "new" metrics are equivalent to "base"
-            if (epoch + 1) / args.epochs == 1:
-                prec1_new = prec1_base
-            else:
-                for c in range(args.num_increment_tasks):
-                    prec1_new += confusion.value()[-c-1][-c-1]
-                prec1_new = prec1_new / args.num_increment_tasks
-
-            # At the continual learning metrics to TensorBoard
-            if metrics_logger:
-                metrics_logger.add_scalar('validation/base_precision@1', prec1_base, len(model.module.seen_tasks)-1)
-                metrics_logger.add_scalar('validation/new_precision@1', prec1_new, len(model.module.seen_tasks)-1)
 
     return top1.avg, losses.avg

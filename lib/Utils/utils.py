@@ -6,9 +6,17 @@ import torch
 import shutil
 
 
-def setup_logging():
-    """Setup logging to both console and file with timestamp"""
-    logs_dir = os.path.join(os.getcwd(), 'logs')
+def setup_logging(run_dir=None):
+    """Setup logging to both console and file with timestamp
+    
+    Parameters:
+        run_dir (str): Directory to save log file. If None, uses 'logs/' directory.
+    """
+    if run_dir is None:
+        logs_dir = os.path.join(os.getcwd(), 'logs')
+    else:
+        logs_dir = run_dir
+    
     os.makedirs(logs_dir, exist_ok=True)
     
     # Create log filename with current timestamp
@@ -81,6 +89,9 @@ def save_checkpoint(state, is_best, file_path, file_name='checkpoint.pth.tar'):
         file_name (str): File name with extension (default: checkpoint.pth.tar).
     """
 
+    # Create directory if it doesn't exist
+    os.makedirs(file_path, exist_ok=True)
+    
     save_path = os.path.join(file_path, file_name)
     torch.save(state, save_path)
     if is_best:

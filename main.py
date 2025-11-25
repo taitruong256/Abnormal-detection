@@ -33,16 +33,22 @@ def parse_args():
     parser.add_argument('-pf', '--print-freq', default=100, type=int, help='print frequency. Default: 100')
     parser.add_argument('--max-train-samples', default=450, type=int, help='maximum number of training samples. Default: None (use all samples)')
     parser.add_argument('--max-test-samples', default=50, type=int, help='maximum number of test samples. Default: None (use 20%% of training samples)')
+    parser.add_argument('--visualization-epoch', default=20, type=int, help='number of epochs after which generations/reconstructions are visualized/saved. Default: 20')
     return parser.parse_args()
 
 if __name__ == "__main__":
-    # Setup logging
-    logger, log_file = setup_logging()
+    args = parse_args()
+    
+    # Create save path first (before logging setup)
+    save_path = 'runs/' + time.strftime("%Y-%m-%d_%H-%M-%S", time.gmtime()) + '_' + args.dataset + '_' + args.architecture + '_variational_samples_' + str(args.var_samples) + '_latent_dim_' + str(args.var_latent_dim)
+    os.makedirs(save_path, exist_ok=True)
+    
+    # Setup logging to runs directory
+    logger, log_file = setup_logging(save_path)
     logger.info("="*80)
     logger.info("Starting VAE Model Training and Evaluation")
     logger.info("="*80)
     
-    args = parse_args()
     logger.info(f"Log file saved to: {log_file}")
     logger.info(f"Arguments: {args}")
     
@@ -93,9 +99,6 @@ if __name__ == "__main__":
     epoch = 0
     best_prec = 0
     best_loss = random.getrandbits(128)
-
-    save_path = 'runs/' + time.strftime("%Y-%m-%d_%H-%M-%S", time.gmtime()) + '_' + args.dataset + '_' + args.architecture + '_variational_samples_' + str(args.var_samples) + '_latent_dim_' + str(args.var_latent_dim)
-
 
     # optimize until final amount of epochs is reached. Final amount of epochs is determined through the
     while epoch < (args.epochs):
