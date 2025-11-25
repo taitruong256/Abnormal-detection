@@ -14,3 +14,4 @@ torchvision
 cython 
 libmr
 kagglehub
+seaborn

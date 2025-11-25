@@ -1,101 +1,376 @@
+import math
 import torch
 import numpy as np
-from tqdm import tqdm
-from sklearn.metrics import accuracy_score, confusion_matrix, f1_score
+import torch.nn as nn
 
-from lib.Training.loss_functions import reconstruction_loss 
-from lib.Openset.meta_recognition import build_weibull_model, calculate_outlier_probability
 
-def evaluate_vae(model, device, val_close_loader, val_open_loader, latent_dim, beta, lambda_, input_shape, loss_type):
+def get_latent_embedding(model, data_loader, num_classes, device):
+    """
+    Computes the latent embedding, i.e. z for each element of a dataset. The corresponding z values are directly
+    organized by classes, such that they can readily be used for visualization purposes later.
+
+    Parameters:
+        model (torch.nn.module): Trained model.
+        data_loader (torch.utils.data.DataLoader): The dataset loader.
+        num_classes (int): Numbe of classes.
+        device (str): Device to compute on.
+
+    Returns:
+        torch.Tensor: Stacked tensor of per class z vectors.
+    """
+
+    # switch to evaluation mode
     model.eval()
 
-    total_loss, total_reconstruction_loss, total_kl_divergence = 0.0, 0.0, 0.0
-    total_samples, total_samples_close, total_samples_open = 0, 0, 0
-    total_decentralization_loss_open = 0.0
+    zs = []
+    for i in range(num_classes):
+        zs.append([])
 
-    # Đánh giá trên tập close (central loss)
+    # calculate probabilistic encoder for each dataset element. Store the corresponding mus and sigmas.
     with torch.no_grad():
-        for data, labels in tqdm(val_close_loader, desc="Evaluating VAE (closed dataset)", leave=False):
-            data, labels = data.to(device), labels.to(device)
-            mean, log_var, z, data_reconstructions = model(data)
-            
-            # Tính các hàm loss tách biệt để đánh giá
-            recon_loss = reconstruction_loss(data, data_reconstructions, input_shape)
-            kl_divergence = -0.5 * torch.sum(1 + log_var - mean.pow(2) - log_var.exp()) / latent_dim
-            if loss_type == "recon":
-                loss = recon_loss
-            elif loss_type == 'recon_kld' or loss_type=='recon_kld_decentral':
-                loss = recon_loss + kl_divergence
+        for j, (inputs, classes) in enumerate(data_loader):
+            inputs, classes = inputs.to(device), classes.to(device)
 
-            total_reconstruction_loss += recon_loss.item()
-            total_kl_divergence += kl_divergence.item()
-            total_loss += loss.item()
-            total_samples += len(labels)
-            total_samples_close += len(labels)
+            encoded_mu, encoded_std = model.module.encode(inputs)
+            z = model.module.reparameterize(encoded_mu, encoded_std)
 
-    # Đánh giá trên tập open (decentral loss)
-    if loss_type == "recon_kld_decentral":
-        with torch.no_grad():
-            for data, labels in tqdm(val_open_loader, desc="Evaluating VAE (open dataset)", leave=False):
-                data, labels = data.to(device), labels.to(device)
-                mean, log_var, z, data_reconstructions = model(data)
-                
-                recon_loss = reconstruction_loss(data, data_reconstructions, input_shape)
-                decentral_loss = latent_dim - torch.sum(torch.bmm(z.unsqueeze(1), z.unsqueeze(2))) / z.size(0)
-                loss = decentral_loss * lambda_
-                
-                total_reconstruction_loss += recon_loss.item()
-                total_loss += loss.item()
-                total_decentralization_loss_open += decentral_loss.item()
-                total_samples += len(labels)
-                total_samples_open += len(labels)
-    
-    avg_reconstruction_loss = total_reconstruction_loss / total_samples if total_samples > 0 else 0
-    avg_kl_divergence = total_kl_divergence / total_samples if total_samples > 0 else 0
-    avg_loss = total_loss / total_samples if total_samples > 0 else 0
-    avg_decentralization_loss_open = total_decentralization_loss_open / total_samples_open if total_samples_open > 0 else 0
+            for i in range(inputs.size(0)):
+                zs[classes[i]].append(z[i].data)
 
-    return avg_loss, avg_reconstruction_loss, avg_kl_divergence, avg_decentralization_loss_open
+    # stack list of tensors into tensors
+    for i in range(len(zs)):
+        if len(zs[i]) > 0:
+            zs[i] = torch.stack(zs[i], dim=0)
+
+    return zs
 
 
-def evaluate_weibull(vae, device, all_latent_vectors, mean_vector, open_loader, num_classes, latent_dim, tail_size):
-    vae.eval()
-    true_labels = []
-    pred_labels = []
-    outlier_probs = []
-    weibull_model = build_weibull_model(mean_vector, all_latent_vectors, num_classes, tail_size)
+def eval_dataset(model, data_loader, num_classes, device, samples=1, calc_reconstruction=False, autoregression=False):
+    """
+    Evaluates an entire dataset with the unified model and stores z values, latent mus and sigmas and output
+    predictions according to whether the classification is correct or not.
+    The values for correct predictions can later be used for plotting or fitting of Weibull models.
 
+    Parameters:
+        model (torch.nn.module): Trained model.
+        data_loader (torch.utils.data.DataLoader): The dataset loader.
+        num_classes (int): Number of classes.
+        device (str): Device to compute on.
+        samples (int): Number of variational samples.
+        calc_reconstruction (bool): Option to turn on/off calculation of the decoder for all samples as it is very
+                                    computationally heavy and the user might only be interested in the latent space.
+        autoregression (bool): flag to indicate whether model is decoding in an autoregressive fashion.
+
+    Returns:
+        dict: Dictionary of results and latent values, separated by whether the classification was correct or not.
+    """
+
+    # switch to evaluation mode
+    model.eval()
+
+    correctly_identified = 0
+    tot_samples = 0
+
+    recon_loss_mus = []
+    recon_loss_sigmas = []
+    out_entropy = []
+    out_mus_correct = []
+    out_sigmas_correct = []
+    out_mus_false = []
+    out_sigmas_false = []
+    encoded_mus_correct = []
+    encoded_mus_false = []
+    encoded_sigmas_correct = []
+    encoded_sigmas_false = []
+    zs_correct = []
+    zs_false = []
+
+    for i in range(num_classes):
+        out_mus_correct.append([])
+        out_mus_false.append([])
+        out_sigmas_correct.append([])
+        out_sigmas_false.append([])
+        encoded_mus_correct.append([])
+        encoded_mus_false.append([])
+        encoded_sigmas_correct.append([])
+        encoded_sigmas_false.append([])
+        zs_false.append([])
+        zs_correct.append([])
+
+    if autoregression:
+        recon_loss = nn.CrossEntropyLoss(reduction='sum')
+    else:
+        recon_loss = nn.BCEWithLogitsLoss(reduction='none')
+
+    # evaluate the encoder and classifier and store results in corresponding lists according to predicted class.
+    # Prediction mean confidence and uncertainty is also obtained if amount of samples is greater than one.
     with torch.no_grad():
-        for x_batch, y_batch in tqdm(open_loader, desc="Evaluating Weibull", leave=False):
-            x_batch, y_batch = x_batch.to(device), y_batch.to(device)
-            _, _, z_batch, _ = vae(x_batch)
+        for j, (inputs, classes) in enumerate(data_loader):
+            inputs, classes = inputs.to(device), classes.to(device)
+            encoded_mu, encoded_std = model.module.encode(inputs)
 
-            for z, y in zip(z_batch, y_batch):
-                z = z.cpu().detach().numpy()
-                outlier_probability = calculate_outlier_probability(z, mean_vector, weibull_model, num_classes)
-                true_labels.append(0 if y.item() < num_classes else 1)
-                outlier_probs.append(max(0, min(outlier_probability)))  # Lưu lại xác suất outlier nhỏ nhất
+            out_samples = torch.zeros(samples, inputs.size(0), num_classes).to(device)
+            z_samples = torch.zeros(samples, encoded_mu.size(0), encoded_mu.size(1)).to(device)
+            recon_loss_samples = torch.zeros(samples, inputs.size(0)).to(device)
 
-    true_labels = np.array(true_labels)
-    outlier_probs = np.array(outlier_probs)
+            if autoregression:
+                recon_target = (inputs * 255).long()
+            else:
+                recon_target = inputs
+
+            # sampling z and classifying
+            for i in range(samples):
+                z = model.module.reparameterize(encoded_mu, encoded_std)
+                z_samples[i] = z
+
+                cl = model.module.classifier(z)
+                out = torch.nn.functional.softmax(cl, dim=1)
+                out_samples[i] = out
+
+                if calc_reconstruction:
+                    dec = model.module.decode(z)
+
+                    if autoregression:
+                        # autoregressive loss in bits per dimension
+                        dec = model.module.pixelcnn(inputs, torch.sigmoid(dec)).contiguous()
+                        recon_loss_samples[i] = (recon_loss(dec, recon_target) / torch.numel(inputs)) \
+                                                * math.log2(math.e)
+                    else:
+                        recon_loss_samples[i] = recon_loss(dec, recon_target).sum(dim=[1, 2, 3])
+
+            # calculate the mean and std. Only removes a dummy dimension if number of variational samples is set to one.
+            out_mean = out_samples.mean(dim=0)
+            out_std = out_samples.std(dim=0)
+            zs_mean = z_samples.mean(dim=0)
+
+            eps = 1e-10
+            out_entropy.append(-torch.sum(out_mean * torch.log(out_mean + eps), dim=1).cpu().detach().numpy())
+
+            if calc_reconstruction:
+                recon_loss_mu = recon_loss_samples.mean(dim=0)
+                recon_loss_sigma = recon_loss_samples.std(dim=0)
+
+            # for each input and respective prediction store independently depending on whether classification was
+            # correct. The list of correct classifications is later used for fitting of Weibull models if the
+            # data_loader is loading the training set.
+            for i in range(inputs.size(0)):
+                tot_samples += 1
+
+                if calc_reconstruction:
+                    recon_loss_mus.append(recon_loss_mu[i].item())
+                    recon_loss_sigmas.append(recon_loss_sigma[i].item())
+
+                idx = torch.argmax(out_mean[i]).item()
+                if classes[i].item() != idx:
+                    out_mus_false[idx].append(out_mean[i][idx].item())
+                    out_sigmas_false[idx].append(out_std[i][idx].item())
+                    encoded_mus_false[idx].append(encoded_mu[i].data)
+                    encoded_sigmas_false[idx].append(encoded_std[i].data)
+                    zs_false[idx].append(zs_mean[i].data)
+                else:
+                    correctly_identified += 1
+                    out_mus_correct[idx].append(out_mean[i][idx].item())
+                    out_sigmas_correct[idx].append(out_std[i][idx].item())
+                    encoded_mus_correct[idx].append(encoded_mu[i].data)
+                    encoded_sigmas_correct[idx].append(encoded_std[i].data)
+                    zs_correct[idx].append(zs_mean[i].data)
+
+    acc = correctly_identified / float(tot_samples)
+
+    out_entropy = np.concatenate(out_entropy).ravel().tolist()
+
+    # stack list of tensors into tensors
+    for i in range(len(encoded_mus_correct)):
+        if len(encoded_mus_correct[i]) > 0:
+            encoded_mus_correct[i] = torch.stack(encoded_mus_correct[i], dim=0)
+            encoded_sigmas_correct[i] = torch.stack(encoded_sigmas_correct[i], dim=0)
+            zs_correct[i] = torch.stack(zs_correct[i], dim=0)
+        if len(encoded_mus_false[i]) > 0:
+            encoded_mus_false[i] = torch.stack(encoded_mus_false[i], dim=0)
+            encoded_sigmas_false[i] = torch.stack(encoded_sigmas_false[i], dim=0)
+            zs_false[i] = torch.stack(zs_false[i], dim=0)
+
+    # Return a dictionary containing all the stored values
+    return {"accuracy": acc, "encoded_mus_correct": encoded_mus_correct, "encoded_mus_false": encoded_mus_false,
+            "encoded_sigmas_correct": encoded_sigmas_correct, "encoded_sigmas_false": encoded_sigmas_false,
+            "zs_correct": zs_correct, "zs_false": zs_false,
+            "out_mus_correct": out_mus_correct, "out_sigmas_correct": out_sigmas_correct,
+            "out_mus_false": out_mus_false, "out_sigmas_false": out_sigmas_false, "out_entropy": out_entropy,
+            "recon_loss_mus": recon_loss_mus, "recon_loss_sigmas": recon_loss_sigmas}
+
+
+def eval_openset_dataset(model, data_loader, num_classes, device, samples=1,
+                         calc_reconstruction=False, autoregression=False):
+    """
+    Evaluates an entire dataset with the unified model and stores z values, latent mus and sigmas and output
+    predictions such that they can later be used for statistical outlier evaluation with the fitted Weibull models.
+    This is merely for convenience to keep the rest of the code API the same. Note that the Weibull model's prediction
+    of whether a sample from an unknown dataset is a statistical outlier or not can be done on an instance level.
+    Similar to the eval_dataset function but without splitting of correct vs. false predictions as the dataset
+    is unknown in the open-set scenario.
+
+    Parameters:
+        model (torch.nn.module): Trained model.
+        data_loader (torch.utils.data.DataLoader): The dataset loader.
+        num_classes (int): Number of classes.
+        device (str): Device to compute on.
+        samples (int): Number of variational samples.
+        calc_reconstruction (bool): Option to turn on/off calculation of the decoder for all samples as it is very
+                                    computationally heavy and the user might only be interested in the latent space.
+        autoregression (bool): flag to indicate whether model is decoding in an autoregressive fashion.
+
+
+    Returns:
+        dict: Dictionary of results and latent values.
+    """
+
+    # switch to evaluation mode
+    model.eval()
+
+    out_mus = []
+    out_sigmas = []
+    encoded_mus = []
+    encoded_sigmas = []
+    zs = []
+
+    out_entropy = []
+
+    recon_loss_mus = []
+    recon_loss_sigmas = []
+
+    for i in range(num_classes):
+        out_mus.append([])
+        out_sigmas.append([])
+        encoded_mus.append([])
+        encoded_sigmas.append([])
+        zs.append([])
+
+    if autoregression:
+        recon_loss = nn.CrossEntropyLoss(reduction='sum')
+    else:
+        recon_loss = nn.BCEWithLogitsLoss(reduction='none')
+
+    # evaluate the encoder and classifier and store results in corresponding lists according to predicted class.
+    # Prediction mean confidence and uncertainty is also obtained if amount of latent samples is greater than one.
+    with torch.no_grad():
+        for j, (inputs, classes) in enumerate(data_loader):
+            inputs, classes = inputs.to(device), classes.to(device)
+            encoded_mu, encoded_std = model.module.encode(inputs)
+
+            out_samples = torch.zeros(samples, inputs.size(0), num_classes).to(device)
+            z_samples = torch.zeros(samples, encoded_mu.size(0), encoded_mu.size(1)).to(device)
+            recon_loss_samples = torch.zeros(samples, inputs.size(0)).to(device)
+
+            if autoregression:
+                recon_target = (inputs * 255).long()
+            else:
+                recon_target = inputs
+
+            # sampling z and classifying
+            for i in range(samples):
+                z = model.module.reparameterize(encoded_mu, encoded_std)
+                z_samples[i] = z
+
+                cl = model.module.classifier(z)
+                out = torch.nn.functional.softmax(cl, dim=1)
+                out_samples[i] = out
+
+                if calc_reconstruction:
+                    dec = model.module.decode(z)
+
+                    if autoregression:
+                        # autoregressive loss in bits per dimension
+                        dec = model.module.pixelcnn(inputs, torch.sigmoid(dec)).contiguous()
+                        recon_loss_samples[i] = (recon_loss(dec, recon_target) / torch.numel(inputs)) \
+                                                * math.log2(math.e)
+                    else:
+                        recon_loss_samples[i] = recon_loss(dec, recon_target).sum(dim=[1, 2, 3])
+
+            # calculate the mean and std. This just removes a dummy dimension if variational samples are set to one.
+            out_mean = out_samples.mean(0)
+            out_std = out_samples.std(0)
+            zs_mean = z_samples.mean(dim=0)
+
+            # calculate entropy for the means of samples: - sum pc*log(pc)
+            eps = 1e-10
+            out_entropy.append(- torch.sum(out_mean * torch.log(out_mean + eps), dim=1).cpu().detach().numpy())
+
+            if calc_reconstruction:
+                recon_loss_mu = recon_loss_samples.mean(dim=0)
+                recon_loss_sigma = recon_loss_samples.std(dim=0)
+
+            # In contrast to the eval_dataset function, there is no split into correct or false values as the dataset
+            # is unknown.
+            for i in range(inputs.size(0)):
+                idx = torch.argmax(out_mean[i]).item()
+                out_mus[idx].append(out_mean[i][idx].item())
+                out_sigmas[idx].append(out_std[i][idx].item())
+                encoded_mus[idx].append(encoded_mu[i].data)
+                encoded_sigmas[idx].append(encoded_std[i].data)
+                zs[idx].append(zs_mean[i].data)
+
+                if calc_reconstruction:
+                    recon_loss_mus.append(recon_loss_mu[i].item())
+                    recon_loss_sigmas.append(recon_loss_sigma[i].item())
+
+    # stack latent activations into a tensor
+    for i in range(len(encoded_mus)):
+        if len(encoded_mus[i]) > 0:
+            encoded_mus[i] = torch.stack(encoded_mus[i], dim=0)
+            encoded_sigmas[i] = torch.stack(encoded_sigmas[i], dim=0)
+            zs[i] = torch.stack(zs[i], dim=0)
+
+    out_entropy = np.concatenate(out_entropy).ravel().tolist()
+
+    # Return a dictionary of stored values.
+    return {"encoded_mus": encoded_mus, "encoded_sigmas": encoded_sigmas,
+            "out_mus": out_mus, "out_sigmas": out_sigmas, "zs": zs, "out_entropy": out_entropy,
+            "recon_loss_mus": recon_loss_mus, "recon_loss_sigmas": recon_loss_sigmas}
+
+
+def sample_per_class_zs(model, num_classes, num, device, use_new_z_bound, z_mean_bound):
+    """
+    Convenience method to draw samples from the prior and directly attach a label to them from the classifier.
+    In generative replay with outlier rejection, the samples' outlier probabilities can then be directly computed and
+    samples rejected or accepted before calculating the probabilistic decoder.
+
+    We have added an optional flag and optional specification of Gaussian prior standard deviation, even though it is
+    not described and has not been used in the original paper. The general idea is that if the optimization doesn't
+    succeed and the approximate posterior is far away from a unit Gaussian, during generative replay we can gauge
+    whether specific class regions of high density are sampled or not (as fitted by the Weibull models). If areas
+    of large class density lie outside the range of a Unit Gaussian, we can adaptively change the prior because we have
+    additional knowledge from the Weibull models on the expected range.
+
+    Parameters:
+        model (torch.nn.module): Trained model.
+        num_classes (int): Number of classes.
+        num (int): Number of samples to draw.
+        device (str): Device to compute on.
+        use_new_z_bound (bool): Flag indicating whether a modifed prior with larger std should be used.
+        z_mean_bound (float): New standard deviation for the Gaussian prior if use_new_z_bound is True.
+    """
     
-    best_f1 = 0
-    best_threshold = 0.05
-    best_pred_labels = np.zeros_like(true_labels)
+    z_samples_per_class = []
+    for i in range(num_classes):
+        z_samples_per_class.append([])
 
-    # Tìm ngưỡng với F1 score tốt nhất
-    threshold_list = np.arange(0.05, 1, 0.05)
-    for threshold in threshold_list:
-        pred_labels = (outlier_probs >= threshold).astype(int)
-        f1 = f1_score(true_labels, pred_labels, average=None).mean()
-        
-        if f1 > best_f1:
-            best_f1 = f1
-            best_threshold = threshold
-            best_pred_labels = pred_labels
+    # sample from the prior or modified prior.
+    if use_new_z_bound:
+        z_samples = torch.randn(num, model.module.latent_dim).to(device) * z_mean_bound
+    else:
+        z_samples = torch.randn(num, model.module.latent_dim).to(device)
 
-    # Tính toán accuracy và confusion matrix với ngưỡng tốt nhất
-    accuracy = accuracy_score(true_labels, best_pred_labels)
-    confusion = confusion_matrix(true_labels, best_pred_labels)
+    # classify the samples
+    cl = model.module.classifier(z_samples)
+    out = torch.nn.functional.softmax(cl, dim=1)
 
-    return accuracy, best_f1, confusion, best_threshold
+    # Store the z samples and labels.
+    for i in range(out.size(0)):
+        idx = torch.argmax(out[i]).item()
+        z_samples_per_class[idx].append(z_samples[i].data)
+
+    for i in range(len(z_samples_per_class)):
+        if len(z_samples_per_class[i]) > 0:
+            z_samples_per_class[i] = torch.stack(z_samples_per_class[i], dim=0)
+
+    return {"z_samples": z_samples_per_class}
