@@ -2,6 +2,7 @@ import math
 import torch
 import numpy as np
 import torch.nn as nn
+from tqdm import tqdm
 
 
 def get_latent_embedding(model, data_loader, num_classes, device):
@@ -28,7 +29,7 @@ def get_latent_embedding(model, data_loader, num_classes, device):
 
     # calculate probabilistic encoder for each dataset element. Store the corresponding mus and sigmas.
     with torch.no_grad():
-        for j, (inputs, classes) in enumerate(data_loader):
+        for j, (inputs, classes) in enumerate(tqdm(data_loader, desc="Getting Latent Embedding")):
             inputs, classes = inputs.to(device), classes.to(device)
 
             encoded_mu, encoded_std = model.module.encode(inputs)
@@ -105,7 +106,7 @@ def eval_dataset(model, data_loader, num_classes, device, samples=1, calc_recons
     # evaluate the encoder and classifier and store results in corresponding lists according to predicted class.
     # Prediction mean confidence and uncertainty is also obtained if amount of samples is greater than one.
     with torch.no_grad():
-        for j, (inputs, classes) in enumerate(data_loader):
+        for j, (inputs, classes) in enumerate(tqdm(data_loader, desc="Evaluating Dataset")):
             inputs, classes = inputs.to(device), classes.to(device)
             encoded_mu, encoded_std = model.module.encode(inputs)
 
@@ -253,7 +254,7 @@ def eval_openset_dataset(model, data_loader, num_classes, device, samples=1,
     # evaluate the encoder and classifier and store results in corresponding lists according to predicted class.
     # Prediction mean confidence and uncertainty is also obtained if amount of latent samples is greater than one.
     with torch.no_grad():
-        for j, (inputs, classes) in enumerate(data_loader):
+        for j, (inputs, classes) in enumerate(tqdm(data_loader, desc="Evaluating Open Set Dataset")):
             inputs, classes = inputs.to(device), classes.to(device)
             encoded_mu, encoded_std = model.module.encode(inputs)
 

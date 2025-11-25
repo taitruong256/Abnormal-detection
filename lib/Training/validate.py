@@ -3,6 +3,7 @@ import math
 import torch
 import logging
 import torch.nn.functional as F
+from tqdm import tqdm
 from lib.Utility.metrics import AverageMeter
 from lib.Utility.metrics import ConfusionMeter
 from lib.Utility.metrics import accuracy
@@ -53,7 +54,7 @@ def validate(Dataset, model, criterion, epoch, metrics_logger, device, save_path
 
     # evaluate the entire validation dataset
     with torch.no_grad():
-        for i, (inp, target) in enumerate(Dataset.val_loader):
+        for i, (inp, target) in enumerate(tqdm(Dataset.val_loader, desc=f"Epoch {epoch+1} Validation")):
             inp = inp.to(device)
             target = target.to(device)
 

@@ -1,6 +1,7 @@
 import time
 import torch
 import logging
+from tqdm import tqdm
 from lib.Utility.metrics import AverageMeter
 from lib.Utility.metrics import accuracy
 
@@ -41,7 +42,7 @@ def train(Dataset, model, criterion, epoch, optimizer, metrics_logger, device, a
     end = time.time()
 
     # train
-    for i, (inp, target) in enumerate(Dataset.train_loader):
+    for i, (inp, target) in enumerate(tqdm(Dataset.train_loader, desc=f"Epoch {epoch+1} Training")):
 
         inp = inp.to(device)
         target = target.to(device)
