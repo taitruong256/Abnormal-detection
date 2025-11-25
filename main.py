@@ -83,7 +83,7 @@ if __name__ == "__main__":
     num_classes = dataset.num_classes
     net_init_method = getattr(architectures, args.architecture)
     # build the model
-    model = net_init_method(device, num_classes, num_colors, args)
+    model = net_init_method(device, num_classes, num_colors, args).to(device)
     # print model summary
     logger.info(model)
     # print number of parameters
