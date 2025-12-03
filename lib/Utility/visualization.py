@@ -8,6 +8,11 @@ import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 from matplotlib.colors import ListedColormap
+import glob
+from PIL import Image
+from matplotlib.gridspec import GridSpec
+import logging
+import json
 
 # matplotlib backend, required for plotting of images to tensorboard
 matplotlib.use('Agg')
@@ -491,3 +496,186 @@ def visualize_reconstruction_classification(data, other_data_dicts, dict_key, da
     plt.legend(loc=0, fontsize=legend_font_size - 15)
     plt.savefig(os.path.join(save_path, data_name + '_' + ",".join(list(other_data_dicts.keys())) +
                              '_reconstruction_loss_outlier_classification' + '.pdf'), bbox_inches='tight')
+
+
+def visualize_all_training_results(save_path, max_cols=3):
+    """
+    Visualize all training result images in a grid layout.
+    
+    Args:
+        save_path (str): Path to directory containing result images
+        max_cols (int): Maximum number of columns in grid layout. Default: 3
+    
+    Returns:
+        str: Path to saved summary image, or None if no images found
+    """
+    logger = logging.getLogger()
+    
+    if not os.path.exists(save_path):
+        logger.warning(f"Directory not found: {save_path}")
+        return None
+    
+    # Find all PNG images
+    all_images = glob.glob(os.path.join(save_path, '*.png'))
+    
+    if not all_images:
+        logger.info("No images found to visualize")
+        return None
+    
+    # Sort by filename
+    all_images.sort()
+    
+    logger.info(f"\n{'='*80}")
+    logger.info(f"Visualizing {len(all_images)} images from training results")
+    logger.info(f"{'='*80}")
+    
+    # Calculate grid layout
+    num_images = len(all_images)
+    num_cols = min(max_cols, num_images)
+    num_rows = (num_images + num_cols - 1) // num_cols
+    
+    # Create figure
+    fig = plt.figure(figsize=(6 * num_cols, 5 * num_rows))
+    gs = GridSpec(num_rows, num_cols, figure=fig, hspace=0.3, wspace=0.3)
+    
+    # Display each image
+    for idx, img_path in enumerate(all_images):
+        row = idx // num_cols
+        col = idx % num_cols
+        
+        ax = fig.add_subplot(gs[row, col])
+        
+        try:
+            img = Image.open(img_path)
+            ax.imshow(img)
+            ax.axis('off')
+            
+            # Create title from filename
+            img_name = os.path.basename(img_path)
+            ax.set_title(img_name, fontsize=10, pad=10)
+            
+            logger.info(f"  ✓ {img_name}")
+            
+        except Exception as e:
+            logger.warning(f"  ⚠️  Error loading {os.path.basename(img_path)}: {e}")
+            ax.text(0.5, 0.5, f'Error loading\n{os.path.basename(img_path)}',
+                   ha='center', va='center', transform=ax.transAxes)
+            ax.axis('off')
+    
+    plt.suptitle(f'Training Results: {os.path.basename(save_path)}', 
+                 fontsize=14, fontweight='bold', y=0.995)
+    plt.tight_layout()
+    
+    # Save summary visualization
+    summary_path = os.path.join(save_path, 'all_results_summary.png')
+    plt.savefig(summary_path, dpi=150, bbox_inches='tight')
+    logger.info(f"\n✓ Saved summary visualization: {summary_path}")
+    
+    plt.show()
+    logger.info(f"{'='*80}\n")
+    
+    return summary_path
+
+
+def plot_training_metrics(save_path):
+    """
+    Plot training and validation metrics from JSON log file.
+    Each metric is saved as a separate PNG file.
+    
+    Args:
+        save_path (str): Path to directory containing metrics JSON file
+    
+    Returns:
+        list: List of paths to saved metric plots, or None if no metrics found
+    """
+    
+    logger = logging.getLogger()
+    
+    # Find metrics JSON file
+    json_files = glob.glob(os.path.join(save_path, '*_metrics.json'))
+    
+    if not json_files:
+        logger.warning(f"No metrics JSON file found in {save_path}")
+        return None
+    
+    metrics_file = json_files[0]
+    logger.info(f"\n{'='*80}")
+    logger.info(f"Plotting training metrics from: {os.path.basename(metrics_file)}")
+    logger.info(f"{'='*80}")
+    
+    # Load metrics
+    with open(metrics_file, 'r') as f:
+        metrics = json.load(f)
+    
+    if not metrics:
+        logger.warning("No metrics data found in JSON file")
+        return None
+    
+    # Separate training and validation metrics
+    train_metrics = {k: v for k, v in metrics.items() if k.startswith('training/')}
+    val_metrics = {k: v for k, v in metrics.items() if k.startswith('validation/')}
+    
+    # Define metrics to plot
+    metrics_config = [
+        ('train_average_loss', 'val_average_loss', 'Average Loss', 'average_loss'),
+        ('train_class_loss', 'val_class_loss', 'Classification Loss', 'classification_loss'),
+        ('train_recon_loss', 'val_recon_loss_nat', 'Reconstruction Loss', 'reconstruction_loss'),
+        ('train_KLD', 'val_KLD', 'KL Divergence', 'kl_divergence'),
+        ('train_precision@1', 'val_precision@1', 'Precision@1 (%)', 'precision'),
+    ]
+    
+    saved_plots = []
+    
+    # Plot each metric separately
+    for train_key, val_key, title, filename in metrics_config:
+        train_full_key = f'training/{train_key}'
+        val_full_key = f'validation/{val_key}'
+        
+        # Create individual figure for this metric
+        fig, ax = plt.subplots(figsize=(10, 6))
+        
+        has_data = False
+        
+        # Plot training data
+        if train_full_key in train_metrics:
+            data = train_metrics[train_full_key]
+            steps = [d['step'] for d in data]
+            values = [d['value'] for d in data]
+            ax.plot(steps, values, 'b-o', label='Training', linewidth=2, markersize=6, alpha=0.8)
+            logger.info(f"  ✓ Plotted {train_key}: {len(steps)} points")
+            has_data = True
+        
+        # Plot validation data
+        if val_full_key in val_metrics:
+            data = val_metrics[val_full_key]
+            steps = [d['step'] for d in data]
+            values = [d['value'] for d in data]
+            ax.plot(steps, values, 'r-s', label='Validation', linewidth=2, markersize=6, alpha=0.8)
+            logger.info(f"  ✓ Plotted {val_key}: {len(steps)} points")
+            has_data = True
+        
+        if has_data:
+            ax.set_xlabel('Epoch', fontsize=12)
+            ax.set_ylabel(title, fontsize=12)
+            ax.set_title(title, fontsize=14, fontweight='bold', pad=15)
+            ax.legend(loc='best', fontsize=11, framealpha=0.9)
+            ax.grid(True, alpha=0.3, linestyle='--')
+            
+            plt.tight_layout()
+            
+            # Save individual metric plot
+            metric_plot_path = os.path.join(save_path, f'metric_{filename}.png')
+            plt.savefig(metric_plot_path, dpi=150, bbox_inches='tight')
+            logger.info(f"  → Saved: {os.path.basename(metric_plot_path)}")
+            saved_plots.append(metric_plot_path)
+            
+            plt.close(fig)
+        else:
+            plt.close(fig)
+            logger.warning(f"  ⚠️  No data for {title}")
+    
+    if saved_plots:
+        logger.info(f"\n✓ Saved {len(saved_plots)} metric plots")
+    logger.info(f"{'='*80}\n")
+    
+    return saved_plots if saved_plots else None

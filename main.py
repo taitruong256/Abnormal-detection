@@ -9,6 +9,7 @@ from lib.Training.loss_functions import joint_loss_function as criterion
 import random 
 from lib.Training.train import train
 from lib.Training.validate import validate
+from lib.Utility.visualization import visualize_all_training_results, plot_training_metrics
 import time 
 
 def parse_args():
@@ -32,7 +33,7 @@ def parse_args():
     parser.add_argument('--epochs', default=10, type=int, help='number of total epochs to run. Default: 10')
     parser.add_argument('--var-beta', default=0.1, type=float, help='weight term for KLD loss. Default: 0.1')
     parser.add_argument('-pf', '--print-freq', default=100, type=int, help='print frequency. Default: 100')
-    parser.add_argument('--visualization-epoch', default=20, type=int, help='number of epochs after which generations/reconstructions are visualized/saved. Default: 20')
+    parser.add_argument('--visualization-epoch', default=5, type=int, help='number of epochs after which generations/reconstructions are visualized/saved. Default: 20')
     parser.add_argument('--autoregression', default=False, type=bool, help='use autoregression. Default: False')
     parser.add_argument('--max-samples', default=None, type=int, help='Limit dataset to first N samples for quick testing (train=N, val=N/4). Default: None (use all data)')
     return parser.parse_args()
@@ -143,3 +144,24 @@ if __name__ == "__main__":
 
         # increment epoch counters
         epoch += 1
+    
+    # Training completed - visualize all results
+    logger.info("\n" + "="*80)
+    logger.info("Training Completed!")
+    logger.info("="*80)
+    logger.info(f"Best Precision: {best_prec:.2f}%")
+    logger.info(f"Best Loss: {best_loss:.5f}")
+    logger.info(f"Results saved in: {save_path}")
+    
+    # Plot training metrics
+    try:
+        plot_training_metrics(save_path)
+    except Exception as e:
+        logger.warning(f"Could not plot training metrics: {e}")
+    
+    # Visualize all training results
+    try:
+        visualize_all_training_results(save_path, max_cols=3)
+    except Exception as e:
+        logger.warning(f"Could not display visualization: {e}")
+        logger.info(f"You can manually visualize results later if needed")
