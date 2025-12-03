@@ -9,6 +9,7 @@ from lib.Utility.metrics import ConfusionMeter
 from lib.Utility.metrics import accuracy
 from lib.Utility.visualization import visualize_confusion
 from lib.Utility.visualization import visualize_image_grid
+from lib.Utility.visualization import visualize_dataset_in_2d_embedding
 
 
 def validate(Dataset, model, criterion, epoch, metrics_logger, device, save_path, args):
@@ -137,5 +138,48 @@ def validate(Dataset, model, criterion, epoch, metrics_logger, device, save_path
     if (epoch + 1) % args.epochs == 0 and epoch > 0:
         # visualize the confusion matrix
         visualize_confusion(None, epoch + 1, confusion.value(), Dataset.class_to_idx, save_path)
+    
+    # Visualize 2D latent space if latent_dim is 2
+    if hasattr(model, 'latent_dim') and model.latent_dim == 2:
+        if (epoch + 1) % args.visualization_epoch == 0 or (epoch + 1) == args.epochs:
+            logger.info(f'Creating 2D latent space visualization (epoch {epoch + 1})...')
+            
+            # Encode entire validation dataset and organize by class
+            # encoding_list[class_id] = tensor of all encodings for that class
+            num_classes = model.num_classes
+            encoding_by_class = [[] for _ in range(num_classes)]
+            
+            with torch.no_grad():
+                for inp, target in Dataset.val_loader:
+                    inp = inp.to(device)
+                    target = target.to(device)
+                    
+                    # Get latent encoding (mu)
+                    _, _, mu, _ = model(inp)
+                    
+                    # Group encodings by class
+                    for i in range(mu.size(0)):
+                        class_id = target[i].item()
+                        encoding_by_class[class_id].append(mu[i].cpu())
+            
+            # Convert lists to tensors
+            encoding_list = []
+            for class_encodings in encoding_by_class:
+                if len(class_encodings) > 0:
+                    encoding_list.append(torch.stack(class_encodings))
+                else:
+                    # Empty class - add empty tensor
+                    encoding_list.append(torch.empty(0, 2))
+            
+            # Visualize 2D embedding
+            dataset_name = args.dataset if hasattr(args, 'dataset') else 'Dataset'
+            visualize_dataset_in_2d_embedding(
+                writer=None,
+                encoding_list=encoding_list, 
+                dataset_name=dataset_name,
+                save_path=save_path,
+                task=epoch + 1
+            )
+            logger.info(f'✓ 2D latent space visualization saved for epoch {epoch + 1}')
 
     return top1.avg, losses.avg
