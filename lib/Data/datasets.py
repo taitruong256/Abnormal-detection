@@ -1,1167 +1,506 @@
+"""
+Dataset definitions for open-set recognition experiments.
+Includes MedMNIST datasets and TinyImageNet for open-set evaluation.
+
+Datasets: BloodMNIST (8 classes), OCTMNIST (4 classes), DermaMNIST (7 classes), TissueMNIST (8 classes)
+Image size: 28×28
+Background: 300k Random Images for open-space discrimination
+"""
+
+import os
+import sys
 import torch
-from torch.utils.data import Dataset, Subset
+import numpy as np
+from torch.utils.data import DataLoader, Dataset, Subset
 from torchvision import transforms
+import medmnist
+from medmnist import INFO, PathMNIST, DermaMNIST, OCTMNIST, TissueMNIST, BloodMNIST
 from PIL import Image
-import torchvision.datasets as datasets
-import os 
-import glob
 
-class BreastCancerDataset(Dataset):
-    def __init__(self, df, input_shape):
-        self.df = df
-        self.input_shape = input_shape
-        
-        self.transform = transforms.Compose([
-            transforms.Resize((self.input_shape, self.input_shape)),
-            transforms.ToTensor()
-        ])
-
-    def __len__(self):
-        return len(self.df)
-
-    def __getitem__(self, idx):
-        png_path = self.df.iloc[idx]['png_path']
-        img_tensor = self.read_and_resize_image(png_path)
-
-        label = self.df.iloc[idx]['cancer']
-        label_tensor = torch.tensor(label, dtype=torch.long)
-
-        return img_tensor, label_tensor
-
-    def read_and_resize_image(self, png_path):
-        img = Image.open(png_path).convert('L') 
-        img_tensor = self.transform(img) 
-        return img_tensor
+# Add configs to path
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'configs'))
+try:
+    from dataset_splits import get_unknown_classes, DATASET_INFO
+except ImportError:
+    DATASET_INFO = None
+    get_unknown_classes = None
 
 
-
-
-class MNIST:
+class FilteredDataset(Dataset):
     """
-    MNIST dataset featuring gray-scale 28x28 images of
-    hand-written characters belonging to ten different classes.
-    Dataset implemented with torchvision.datasets.MNIST.
-
-    Parameters:
-        args (dict): Dictionary of (command line) arguments.
-            Needs to contain batch_size (int) and workers(int).
-        is_gpu (bool): True if CUDA is enabled.
-            Sets value of pin_memory in DataLoader.
-
-    Attributes:
-        train_transforms (torchvision.transforms): Composition of transforms
-            including conversion to Tensor, repeating gray-scale image to
-            three channel for consistent use with different architectures
-            and normalization.
-        val_transforms (torchvision.transforms): Composition of transforms
-            including conversion to Tensor, repeating gray-scale image to
-            three channel for consistent use with different architectures
-            and normalization.
-        trainset (torch.utils.data.TensorDataset): Training set wrapper.
-        valset (torch.utils.data.TensorDataset): Validation set wrapper.
-        class_to_idx (dict): Defines mapping from class names to integers.
-        train_loader (torch.utils.data.DataLoader): Training set loader with shuffling.
-        val_loader (torch.utils.data.DataLoader): Validation set loader.
+    Helper class to filter and remap labels for open-set recognition.
     """
-
-    def __init__(self, is_gpu, args):
-        self.num_classes = 10
-        self.gray_scale = args.gray_scale
-        self.max_train_samples = args.max_train_samples
-        self.max_test_samples = args.max_test_samples
-
-        self.train_transforms, self.val_transforms = self.__get_transforms(args.patch_size)
-
-        self.trainset, self.valset = self.get_dataset()
-        self.train_loader, self.val_loader = self.get_dataset_loader(args.batch_size, args.workers, is_gpu)
-
-        # Need to define the class dictionary by hand as the default
-        # torchvision MNIST data loader does not provide class_to_idx
-        self.class_to_idx = {'0': 0,
-                             '1': 1,
-                             '2': 2,
-                             '3': 3,
-                             '4': 4,
-                             '5': 5,
-                             '6': 6,
-                             '7': 7,
-                             '8': 8,
-                             '9': 9}
-
-    def __get_transforms(self, patch_size):
-        # optionally scale the images and repeat them to three channels
-        # important note: these transforms will only be called once during the
-        # creation of the dataset and no longer in the incremental datasets that inherit.
-        # Adding data augmentation here is thus the wrong place!
-
-        if self.gray_scale:
-            train_transforms = transforms.Compose([
-                transforms.Resize(size=(patch_size, patch_size)),
-                transforms.ToTensor(),
-            ])
-
-            val_transforms = transforms.Compose([
-                transforms.Resize(size=(patch_size, patch_size)),
-                transforms.ToTensor(),
-            ])
-        else:
-            train_transforms = transforms.Compose([
-                transforms.Resize(size=(patch_size, patch_size)),
-                transforms.ToTensor(),
-                transforms.Lambda(lambda x: x.repeat(3, 1, 1)),
-            ])
-
-            val_transforms = transforms.Compose([
-                transforms.Resize(size=(patch_size, patch_size)),
-                transforms.ToTensor(),
-                transforms.Lambda(lambda x: x.repeat(3, 1, 1)),
-            ])
-
-        return train_transforms, val_transforms
-
-    def get_dataset(self):
+    def __init__(self, dataset, mask, known_classes):
         """
-        Uses torchvision.datasets.MNIST to load dataset.
-        Downloads dataset if doesn't exist already.
-        Applies max_train_samples and max_test_samples limits if specified.
-
-        Returns:
-             torch.utils.data.TensorDataset: trainset, valset
+        Args:
+            dataset: Base dataset
+            mask: Boolean mask for filtering
+            known_classes: List of known class labels
         """
-
-        trainset = datasets.MNIST('datasets/MNIST/train/', train=True, transform=self.train_transforms,
-                                  target_transform=None, download=True)
-        valset = datasets.MNIST('datasets/MNIST/test/', train=False, transform=self.val_transforms,
-                                target_transform=None, download=True)
-
-        # Apply max_train_samples limit
-        if self.max_train_samples is not None:
-            trainset = Subset(trainset, list(range(min(self.max_train_samples, len(trainset)))))
-
-        # Apply max_test_samples limit (default: 20% of training set)
-        if self.max_test_samples is not None:
-            valset = Subset(valset, list(range(min(self.max_test_samples, len(valset)))))
-        else:
-            # If max_test_samples not specified, use 20% of training samples
-            if self.max_train_samples is not None:
-                test_size = max(1, int(self.max_train_samples * 0.2))
-            else:
-                test_size = len(valset)
-            valset = Subset(valset, list(range(min(test_size, len(valset)))))
-
-        return trainset, valset
-
-    def get_dataset_loader(self, batch_size, workers, is_gpu):
-        """
-        Defines the dataset loader for wrapped dataset
-
-        Parameters:
-            batch_size (int): Defines the batch size in data loader
-            workers (int): Number of parallel threads to be used by data loader
-            is_gpu (bool): True if CUDA is enabled so pin_memory is set to True
-
-        Returns:
-             torch.utils.data.DataLoader: train_loader, val_loader
-        """
-
-        train_loader = torch.utils.data.DataLoader(
-            self.trainset,
-            batch_size=batch_size, shuffle=True,
-            num_workers=workers, pin_memory=is_gpu, sampler=None)
-
-        val_loader = torch.utils.data.DataLoader(
-            self.valset,
-            batch_size=batch_size, shuffle=False,
-            num_workers=workers, pin_memory=is_gpu)
-
-        return train_loader, val_loader
+        self.dataset = dataset
+        self.indices = np.where(mask)[0]
+        self.target_map = {label: idx for idx, label in enumerate(known_classes)}
     
+    def __getitem__(self, index):
+        img, label = self.dataset[self.indices[index]]
+        return img, self.target_map[int(label)]
+    
+    def __len__(self):
+        return len(self.indices)
 
 
-class FashionMNIST:
+class Random300K_Images(Dataset):
     """
-    FashionMNIST dataset featuring gray-scale 28x28 images of
-    Zalando clothing items belonging to ten different classes.
-    Dataset implemented with torchvision.datasets.FashionMNIST.
-
-    Parameters:
-        args (dict): Dictionary of (command line) arguments.
-            Needs to contain batch_size (int) and workers(int).
-        is_gpu (bool): True if CUDA is enabled.
-            Sets value of pin_memory in DataLoader.
-
-    Attributes:
-        train_transforms (torchvision.transforms): Composition of transforms
-            including conversion to Tensor, repeating gray-scale image to
-            three channel for consistent use with different architectures
-            and normalization.
-        val_transforms (torchvision.transforms): Composition of transforms
-            including conversion to Tensor, repeating gray-scale image to
-            three channel for consistent use with different architectures
-            and normalization.
-        trainset (torch.utils.data.TensorDataset): Training set wrapper.
-        valset (torch.utils.data.TensorDataset): Validation set wrapper.
-        train_loader (torch.utils.data.DataLoader): Training set loader with shuffling.
-        val_loader (torch.utils.data.DataLoader): Validation set loader.
-        class_to_idx (dict): Defines mapping from class names to integers.
+    TinyImageNet 300K images for open-set evaluation.
     """
-
-    def __init__(self, is_gpu, args):
-        self.num_classes = 10
-        self.gray_scale = args.gray_scale
-
-        self.train_transforms, self.val_transforms = self.__get_transforms(args.patch_size)
-
-        self.trainset, self.valset = self.get_dataset()
-        self.train_loader, self.val_loader = self.get_dataset_loader(args.batch_size, args.workers, is_gpu)
-
-        self.class_to_idx = {'T-shirt/top': 0,
-                             'Trouser': 1,
-                             'Pullover': 2,
-                             'Dress': 3,
-                             'Coat': 4,
-                             'Sandal': 5,
-                             'Shirt': 6,
-                             'Sneaker': 7,
-                             'Bag': 8,
-                             'Ankle-boot': 9}
-
-    def __get_transforms(self, patch_size):
-        # optionally scale the images and repeat to three channels
-        # important note: these transforms will only be called once during the
-        # creation of the dataset and no longer in the incremental datasets that inherit.
-        # Adding data augmentation here is thus the wrong place!
-        if self.gray_scale:
-            train_transforms = transforms.Compose([
-                transforms.Resize(size=(patch_size, patch_size)),
+    def __init__(self, file_path, transform=None, extendable=0):
+        """
+        Args:
+            file_path: Path to .npy file containing 300k images
+            transform: Optional transform
+            extendable: Number of times to repeat data
+        """
+        self.transform = transform
+        self.extendable = extendable
+        self.offset = 0
+        
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"File not found: {file_path}")
+        
+        self.data = np.load(file_path)
+        if extendable > 0:
+            self.data = np.repeat(self.data, extendable + 1, axis=0)
+        
+        if transform is None:
+            self.transform = transforms.Compose([
+                transforms.Resize((28, 28)),
                 transforms.ToTensor(),
+                transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
             ])
+    
+    def __len__(self):
+        return len(self.data)
+    
+    def __getitem__(self, index):
+        img = self.data[index]
+        img = Image.fromarray(img)
+        
+        if self.transform:
+            img = self.transform(img)
+        
+        # Label -1 indicates unknown/open-set
+        return img, -1
 
-            val_transforms = transforms.Compose([
-                transforms.Resize(size=(patch_size, patch_size)),
+
+class MedMNIST:
+    """
+    MedMNIST dataset wrapper for open-set recognition.
+    
+    Supports datasets:
+    - BloodMNIST: 8 classes, 17,092 color images (28×28)
+    - OCTMNIST: 4 classes, 109,309 grayscale images (28×28)
+    - DermaMNIST: 7 classes, 10,015 color images (28×28)
+    - TissueMNIST: 8 classes, 236,386 grayscale images (28×28)
+    """
+    
+    def __init__(self, known, unknown=None, dataroot='./data', use_gpu=True, 
+                 num_workers=4, batch_size=128, patch_size=28, gray_scale=False,
+                 dataset_name='bloodmnist'):
+        """
+        Args:
+            known: List of known class indices for training
+            unknown: List of unknown class indices (optional, auto-computed from known if None)
+            dataroot: Root directory for datasets
+            use_gpu: Whether to use GPU (pin_memory)
+            num_workers: Number of workers for data loading
+            batch_size: Batch size for data loaders
+            patch_size: Image size (default: 28)
+            gray_scale: Whether to use grayscale (default: False, convert to RGB)
+            dataset_name: MedMNIST dataset name (bloodmnist, octmnist, dermamnist, tissuemnist)
+        """
+        self.dataset_name = dataset_name.lower()
+        self.gray_scale = gray_scale
+        self.patch_size = patch_size
+        
+        # Get dataset info from MedMNIST
+        self.info = INFO[self.dataset_name]
+        self.task = self.info['task']
+        self.n_channels = self.info['n_channels']
+        self.n_classes = len(self.info['label'])
+        
+        # Create class_to_idx mapping
+        self.class_to_idx = {name: idx for idx, name in enumerate(self.info['label'].keys())}
+        
+        # Get known and unknown classes
+        if isinstance(known, dict):
+            self.known = known['known']
+        else:
+            self.known = known
+        
+        # Auto-compute unknown classes if not specified
+        if unknown is not None:
+            self.unknown = unknown
+        else:
+            self.unknown = list(set(range(self.n_classes)) - set(self.known))
+        
+        self.num_classes = len(self.known)
+        
+        print(f"\n{'='*60}")
+        print(f"MedMNIST Dataset: {self.dataset_name.upper()}")
+        print(f"{'='*60}")
+        print(f"Task: {self.task}")
+        print(f"Channels: {self.n_channels}")
+        print(f"Total classes: {self.n_classes}")
+        print(f"Known classes (closed-set): {self.known}")
+        print(f"Unknown classes (open-set): {self.unknown}")
+        print(f"{'='*60}\n")
+        
+        # Get transforms
+        self.train_transforms, self.val_transforms = self.__get_transforms(patch_size, gray_scale)
+        
+        # Load datasets
+        self.trainset, self.valset, self.outset = self.get_dataset(dataroot)
+        
+        # Create data loaders
+        self.train_loader, self.val_loader, self.out_loader = self.get_dataset_loader(
+            batch_size, num_workers, use_gpu
+        )
+    
+    def __get_transforms(self, patch_size, gray_scale=False):
+        """
+        Get train and test transforms with data augmentation.
+        
+        Args:
+            patch_size: Image size (default: 28)
+            gray_scale: Whether to use grayscale or convert to RGB
+            
+        Returns:
+            train_transforms, val_transforms
+        """
+        # Data augmentation for training
+        if gray_scale:
+            train_transforms = transforms.Compose([
+                transforms.Resize((patch_size, patch_size)),
+                transforms.Grayscale(3),
+                transforms.RandomCrop(patch_size, padding=4),
+                transforms.RandomHorizontalFlip(),
+                transforms.RandomVerticalFlip(),
+                transforms.RandomAffine(degrees=0, translate=(0.05, 0.05), scale=(0.95, 1.05)),
+                transforms.RandomApply([transforms.RandomRotation(15)], p=0.5),
                 transforms.ToTensor(),
+                transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
+            ])
+            
+            val_transforms = transforms.Compose([
+                transforms.Resize((patch_size, patch_size)),
+                transforms.Grayscale(3),
+                transforms.ToTensor(),
+                transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
             ])
         else:
             train_transforms = transforms.Compose([
-                transforms.Resize(size=(patch_size, patch_size)),
+                transforms.Resize((patch_size, patch_size)),
+                transforms.Lambda(lambda x: x if x.mode == 'RGB' else x.convert('RGB')),
+                transforms.RandomCrop(patch_size, padding=4),
+                transforms.RandomHorizontalFlip(),
+                transforms.RandomVerticalFlip(),
+                transforms.RandomAffine(degrees=0, translate=(0.05, 0.05), scale=(0.95, 1.05)),
+                transforms.RandomApply([transforms.RandomRotation(15)], p=0.5),
                 transforms.ToTensor(),
-                transforms.Lambda(lambda x: x.repeat(3, 1, 1)),
+                transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
             ])
-
+            
             val_transforms = transforms.Compose([
-                transforms.Resize(size=(patch_size, patch_size)),
+                transforms.Resize((patch_size, patch_size)),
+                transforms.Lambda(lambda x: x if x.mode == 'RGB' else x.convert('RGB')),
                 transforms.ToTensor(),
-                transforms.Lambda(lambda x: x.repeat(3, 1, 1)),
+                transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
             ])
-
+        
         return train_transforms, val_transforms
-
-    def get_dataset(self):
+    
+    def get_dataset(self, dataroot):
         """
-        Uses torchvision.datasets.FashionMNIST to load dataset.
-        Downloads dataset if doesn't exist already.
-
+        Load and filter datasets by known/unknown classes.
+        
+        Args:
+            dataroot: Root directory for datasets
+            
         Returns:
-             torch.utils.data.TensorDataset: trainset, valset
+            trainset, valset, outset (filtered datasets)
         """
-
-        trainset = datasets.FashionMNIST('datasets/FashionMNIST/train/', train=True, transform=self.train_transforms,
-                                         target_transform=None, download=True)
-        valset = datasets.FashionMNIST('datasets/FashionMNIST/test/', train=False, transform=self.val_transforms,
-                                       target_transform=None, download=True)
-
-        return trainset, valset
-
+        # Get the dataset class
+        dataset_mapping = {
+            'pathmnist': PathMNIST,
+            'dermamnist': DermaMNIST,
+            'octmnist': OCTMNIST,
+            'tissuemnist': TissueMNIST,
+            'bloodmnist': BloodMNIST,
+        }
+        
+        if self.dataset_name not in dataset_mapping:
+            # Fallback to dynamic loading for other MedMNIST datasets
+            DataClass = getattr(medmnist, self.info['python_class'])
+        else:
+            DataClass = dataset_mapping[self.dataset_name]
+        
+        # Load raw datasets
+        train_dataset = DataClass(
+            split='train',
+            transform=self.train_transforms,
+            download=True,
+            root=dataroot
+        )
+        
+        test_dataset = DataClass(
+            split='test',
+            transform=self.val_transforms,
+            download=True,
+            root=dataroot
+        )
+        
+        # Print class distribution
+        train_labels = train_dataset.labels.squeeze()
+        print(f"{self.dataset_name.upper()} Training set class distribution: {np.bincount(train_labels)}")
+        
+        # Filter datasets by known and unknown classes
+        train_mask = np.isin(train_dataset.labels.squeeze(), self.known)
+        known_test_mask = np.isin(test_dataset.labels.squeeze(), self.known)
+        unknown_test_mask = np.isin(test_dataset.labels.squeeze(), self.unknown)
+        
+        # Create filtered datasets
+        trainset = FilteredDataset(train_dataset, train_mask, self.known)
+        valset = FilteredDataset(test_dataset, known_test_mask, self.known)
+        outset = FilteredDataset(test_dataset, unknown_test_mask, self.unknown)
+        
+        print(f'{self.dataset_name.upper()} Train samples: {len(trainset)}')
+        print(f'{self.dataset_name.upper()} Test samples (known): {len(valset)}')
+        print(f'{self.dataset_name.upper()} Test samples (unknown): {len(outset)}\n')
+        
+        return trainset, valset, outset
+    
     def get_dataset_loader(self, batch_size, workers, is_gpu):
         """
-        Defines the dataset loader for wrapped dataset
-
-        Parameters:
-            batch_size (int): Defines the batch size in data loader
-            workers (int): Number of parallel threads to be used by data loader
-            is_gpu (bool): True if CUDA is enabled so pin_memory is set to True
-
+        Create data loaders.
+        
+        Args:
+            batch_size: Batch size for data loaders
+            workers: Number of workers for data loading
+            is_gpu: Whether to use GPU (pin_memory)
+            
         Returns:
-             torch.utils.data.DataLoader: train_loader, val_loader
+            train_loader, val_loader, out_loader
         """
-
-        train_loader = torch.utils.data.DataLoader(
+        train_loader = DataLoader(
             self.trainset,
-            batch_size=batch_size, shuffle=True,
-            num_workers=workers, pin_memory=is_gpu, sampler=None)
-
-        val_loader = torch.utils.data.DataLoader(
+            batch_size=batch_size,
+            shuffle=True,
+            num_workers=workers,
+            pin_memory=is_gpu,
+            sampler=None
+        )
+        
+        val_loader = DataLoader(
             self.valset,
-            batch_size=batch_size, shuffle=False,
-            num_workers=workers, pin_memory=is_gpu)
+            batch_size=batch_size,
+            shuffle=False,
+            num_workers=workers,
+            pin_memory=is_gpu
+        )
+        
+        out_loader = DataLoader(
+            self.outset,
+            batch_size=batch_size,
+            shuffle=False,
+            num_workers=workers,
+            pin_memory=is_gpu
+        )
+        
+        return train_loader, val_loader, out_loader
 
-        return train_loader, val_loader
 
-
-class AudioMNIST:
+class TinyImageNetOpenSet(Dataset):
     """
-    AudioMNIST dataset featuring gray-scale 227x227 images of
-    ten spoken digits (0-9).
-    https://github.com/soerenab/AudioMNIST
-    Interpreting and Explaining Deep Neural Networks for Classification of Audio Signals.
-    Becker et al. arXiv:abs/1807.03418
-    Parameters:
-        args (dict): Dictionary of (command line) arguments.
-            Needs to contain batch_size (int) and workers(int).
-        is_gpu (bool): True if CUDA is enabled.
-            Sets value of pin_memory in DataLoader.
-
-    Attributes:
-        trainset (torch.utils.data.TensorDataset): Training set wrapper.
-        valset (torch.utils.data.TensorDataset): Validation set wrapper.
-        train_loader (torch.utils.data.DataLoader): Training set loader with shuffling.
-        val_loader (torch.utils.data.DataLoader): Validation set loader.
-        class_to_idx (dict): Defines mapping from class names to integers.
+    TinyImageNet dataset for open-set evaluation.
+    Loads 300k images from TinyImageNet to use as unknown/novel class data.
     """
-
-    def __init__(self, is_gpu, args):
-        self.num_classes = 10
-        self.gray_scale = args.gray_scale
-
-        self.__path = os.path.expanduser('datasets/AudioMNIST')
-        self.__download()
-
-        self.trainset, self.valset = self.get_dataset(args.patch_size)
-        self.train_loader, self.val_loader = self.get_dataset_loader(args.batch_size, args.workers, is_gpu)
-
-        self.class_to_idx = {'0': 0,
-                             '1': 1,
-                             '2': 2,
-                             '3': 3,
-                             '4': 4,
-                             '5': 5,
-                             '6': 6,
-                             '7': 7,
-                             '8': 8,
-                             '9': 9}
-
-    def __check_exists(self):
+    
+    def __init__(self, root_dir, num_samples=300000, transform=None, download=True, patch_size=28):
         """
-        Check if dataset has already been downloaded
-        Returns:
-             bool: True if downloaded dataset has been found
+        Args:
+            root_dir: Root directory to store TinyImageNet data
+            num_samples: Number of images to use (default: 300k)
+            transform: Optional transform to apply to images
+            download: Whether to download the dataset if not present
+            patch_size: Image size (default: 28)
         """
-
-        return os.path.exists(os.path.join(self.__path, 'train_images_tensor.pt')) and \
-               os.path.exists(os.path.join(self.__path, 'train_labels_tensor.pt')) and \
-               os.path.exists(os.path.join(self.__path, 'test_images_tensor.pt')) and \
-               os.path.exists(os.path.join(self.__path, 'test_labels_tensor.pt'))
-
-    def __download(self):
-        """
-        Downloads the AudioMNIST dataset from the web if dataset
-        hasn't already been downloaded and does a spectrogram conversion.
-        The latter could potentially be refactored into a separate function and conversion parameters (here hard-coded
-        according to original authors) exposed to the command line parser.
-        """
-
-        if self.__check_exists():
-            return
-
-        print("Downloading AudioMNIST dataset")
-
-        # download files
-        try:
-            os.makedirs(self.__path)
-        except OSError as e:
-            if e.errno == errno.EEXIST:
-                pass
-            else:
-                raise
-
-        if not os.path.exists(os.path.join(self.__path, 'AudioMNIST-master.zip')):
-            url = 'https://github.com/soerenab/AudioMNIST/archive/master.zip'
-            wget_data = wget.download(url, out=self.__path)
-
-            archive = zipfile.ZipFile(wget_data)
-
-            for file in archive.namelist():
-                if file.startswith('AudioMNIST-master/data/'):
-                    archive.extract(file, self.__path)
-
-            print("Download successful")
-
-        audio_mnist_src = os.path.join(self.__path, 'AudioMNIST-master/data/')
-        data = np.array(glob.glob(os.path.join(audio_mnist_src, "**/*.wav")))
-
-        train_images = []
-        train_labels = []
-        test_images = []
-        test_labels = []
-
-        # first 5-cross-validation set from https://github.com/soerenab/AudioMNIST/blob/master/preprocess_data.py
-        train_folders = [28, 56, 7, 19, 35, 1, 6, 16, 23, 34, 46, 53, 36, 57, 9, 24, 37, 2,
-                         8, 17, 29, 39, 48, 54, 43, 58, 14, 25, 38, 3, 10, 20, 30, 40, 49, 55,
-                         12, 47, 59, 15, 27, 41, 4, 11, 21, 31, 44, 50]
-        test_folders = [26, 52, 60, 18, 32, 42, 5, 13, 22, 33, 45, 51]
-
-        print("Converting audio to images")
-        # create train and test folders and save audios as images
-        for filepath in tqdm(data):
-            # the last one is just a counter for repeat of each digit, e.g. say zero once, twice, third time..
-
-            dig, vp, rep = filepath.rstrip(".wav").split("/")[-1].split("_")
-
-            # according to https://github.com/soerenab/AudioMNIST/blob/master/preprocess_data.py
-            fs, data = wavf.read(filepath)
-
-            # resample
-            data = librosa.core.resample(y=data.astype(np.float32), orig_sr=fs, target_sr=8000, res_type="scipy")
-            # zero padding
-            if len(data) > 8000:
-                raise ValueError("data length cannot exceed padding length.")
-            elif len(data) < 8000:
-                embedded_data = np.zeros(8000)
-                offset = np.random.randint(low=0, high=8000 - len(data))
-                embedded_data[offset:offset + len(data)] = data
-            elif len(data) == 8000:
-                # nothing to do here
-                embedded_data = data
-                pass
-
-            # 1. fourier transform
-            # stft, with selected parameters, spectrogram will have shape (228, 230)
-            f, t, zxx = scipy.signal.stft(embedded_data, 8000, nperseg=455, noverlap=420, window='hann')
-            # get amplitude
-            zxx = np.abs(zxx[0:227, 2:-1])
-
-            # if not 2, then convert to decibel
-            zxx = librosa.amplitude_to_db(zxx, ref=np.max)
-
-            # normalize from range -80,0 to 0,1
-            zxx = (zxx - zxx.min()) / (zxx.max() - zxx.min())
-
-            zxx = zxx[::-1]  # reverse the order of frequencies to fit the images in the paper
-            zxx = np.atleast_3d(zxx).transpose(2, 0, 1)  # reshape to (1, img_dim_h, img_dim_w)
-
-            # decide to which list to add (train or test)
-            if int(vp) in train_folders:
-                train_images.append(zxx)
-                train_labels.append(int(dig))
-            elif int(vp) in test_folders:
-                test_images.append(zxx)
-                test_labels.append(int(dig))
-            else:
-                raise Exception('Person neither in train nor in test set!')
-
-        train_images = torch.Tensor(train_images).float()
-        train_labels = torch.Tensor(train_labels).long()
-        test_images = torch.Tensor(test_images).float()
-        test_labels = torch.Tensor(test_labels).long()
-
-        torch.save(train_images, os.path.join(self.__path, 'train_images_tensor.pt'))
-        torch.save(train_labels, os.path.join(self.__path, 'train_labels_tensor.pt'))
-        torch.save(test_images, os.path.join(self.__path, 'test_images_tensor.pt'))
-        torch.save(test_labels, os.path.join(self.__path, 'test_labels_tensor.pt'))
-
-        print('Done!')
-
-    def __get_audiomnist(self, path, kind='train'):
-        """
-        Load Audio-MNIST data
-        Parameters:
-            path (str): Base directory path containing .npy files for
-                the Audio-MNIST dataset
-            kind (str): Accepted types are 'train' and 'validation' for
-                training and validation set stored in .npy files
-        Returns:
-            numpy.array: images, labels
-        """
-
-        images = torch.load(os.path.join(path, kind + '_images_tensor.pt'))
-        labels = torch.load(os.path.join(path, kind + '_labels_tensor.pt'))
-
-        return images, labels
-
-    def get_dataset(self, patch_size):
-        """
-        Loads and wraps training and validation datasets
-        Returns:
-             torch.utils.data.TensorDataset: trainset, valset
-        """
-
-        x_train, y_train = self.__get_audiomnist(self.__path, kind='train')
-        x_val, y_val = self.__get_audiomnist(self.__path, kind='test')
-
-        # up and down-sampling
-        x_train = torch.nn.functional.interpolate(x_train, size=patch_size, mode='bilinear')
-        x_val = torch.nn.functional.interpolate(x_val, size=patch_size, mode='bilinear')
-
-        if not self.gray_scale:
-            x_train = x_train.repeat(1, 3, 1, 1)
-            x_val = x_val.repeat(1, 3, 1, 1)
-
-        trainset = torch.utils.data.TensorDataset(x_train, y_train)
-        valset = torch.utils.data.TensorDataset(x_val, y_val)
-
-        return trainset, valset
-
-    def get_dataset_loader(self, batch_size, workers, is_gpu):
-        """
-        Defines the dataset loader for wrapped dataset
-        Parameters:
-            batch_size (int): Defines the batch size in data loader
-            workers (int): Number of parallel threads to be used by data loader
-            is_gpu (bool): True if CUDA is enabled so pin_memory is set to True
-
-        Returns:
-             torch.utils.data.DataLoader: train_loader, val_loader
-        """
-
-        train_loader = torch.utils.data.DataLoader(
-            self.trainset,
-            batch_size=batch_size, shuffle=True,
-            num_workers=workers, pin_memory=is_gpu, sampler=None)
-
-        val_loader = torch.utils.data.DataLoader(
-            self.valset,
-            batch_size=batch_size, shuffle=False,
-            num_workers=workers, pin_memory=is_gpu)
-
-        return train_loader, val_loader
-
-
-class KMNIST:
-    """
-    KMNIST dataset featuring gray-scale 28x28 images of
-    Japanese Kuzushiji characters belonging to ten different classes.
-    Dataset implemented with torchvision.datasets.KMNIST.
-
-    Parameters:
-        args (dict): Dictionary of (command line) arguments.
-            Needs to contain batch_size (int) and workers(int).
-        is_gpu (bool): True if CUDA is enabled.
-            Sets value of pin_memory in DataLoader.
-
-    Attributes:
-        train_transforms (torchvision.transforms): Composition of transforms
-            including conversion to Tensor, repeating gray-scale image to
-            three channel for consistent use with different architectures
-            and normalization.
-        val_transforms (torchvision.transforms): Composition of transforms
-            including conversion to Tensor, repeating gray-scale image to
-            three channel for consistent use with different architectures
-            and normalization.
-        trainset (torch.utils.data.TensorDataset): Training set wrapper.
-        valset (torch.utils.data.TensorDataset): Validation set wrapper.
-        train_loader (torch.utils.data.DataLoader): Training set loader with shuffling.
-        val_loader (torch.utils.data.DataLoader): Validation set loader.
-    """
-
-    def __init__(self, is_gpu, args):
-        self.num_classes = 10
-        self.gray_scale = args.gray_scale
-
-        self.train_transforms, self.val_transforms = self.__get_transforms(args.patch_size)
-
-        self.trainset, self.valset = self.get_dataset()
-        self.train_loader, self.val_loader = self.get_dataset_loader(args.batch_size, args.workers, is_gpu)
-
-    def __get_transforms(self, patch_size):
-        # optionally scale the images and repeat to 3 channels to compare to color images.
-        if self.gray_scale:
-            train_transforms = transforms.Compose([
-                transforms.Resize(size=(patch_size, patch_size)),
+        self.root_dir = root_dir
+        self.num_samples = num_samples
+        self.patch_size = patch_size
+        self.data_dir = os.path.join(root_dir, 'tiny-imagenet-200')
+        
+        # Default transform if not provided
+        if transform is None:
+            self.transform = transforms.Compose([
+                transforms.Resize((patch_size, patch_size)),
                 transforms.ToTensor(),
-            ])
-
-            val_transforms = transforms.Compose([
-                transforms.Resize(size=(patch_size, patch_size)),
-                transforms.ToTensor(),
+                transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
             ])
         else:
-            train_transforms = transforms.Compose([
-                transforms.Resize(size=(patch_size, patch_size)),
-                transforms.ToTensor(),
-                transforms.Lambda(lambda x: x.repeat(3, 1, 1)),
-            ])
-
-            val_transforms = transforms.Compose([
-                transforms.Resize(size=(patch_size, patch_size)),
-                transforms.ToTensor(),
-                transforms.Lambda(lambda x: x.repeat(3, 1, 1)),
-            ])
-
-        return train_transforms, val_transforms
-
-    def get_dataset(self):
+            self.transform = transform
+        
+        if download and not os.path.exists(self.data_dir):
+            self._download_tinyimagenet()
+        
+        # Load image paths
+        self.image_paths = self._load_image_paths()
+        
+        # Limit to num_samples
+        if len(self.image_paths) > num_samples:
+            indices = np.random.choice(len(self.image_paths), num_samples, replace=False)
+            self.image_paths = [self.image_paths[i] for i in indices]
+        
+        print(f"\nTinyImageNet Open-Set Dataset:")
+        print(f"  Total images loaded: {len(self.image_paths)}")
+        print(f"  Image size: {patch_size}x{patch_size}")
+        print(f"  Location: {self.data_dir}\n")
+    
+    def _download_tinyimagenet(self):
+        """Download TinyImageNet dataset."""
+        import urllib.request
+        import zipfile
+        
+        print("Downloading TinyImageNet dataset (237MB)...")
+        url = 'http://cs231n.stanford.edu/tiny-imagenet-200.zip'
+        zip_path = os.path.join(self.root_dir, 'tiny-imagenet-200.zip')
+        
+        os.makedirs(self.root_dir, exist_ok=True)
+        
+        # Download
+        urllib.request.urlretrieve(url, zip_path)
+        
+        # Extract
+        print("Extracting TinyImageNet...")
+        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+            zip_ref.extractall(self.root_dir)
+        
+        # Clean up zip file
+        os.remove(zip_path)
+        print("TinyImageNet download complete!")
+    
+    def _load_image_paths(self):
+        """Load all image paths from TinyImageNet."""
+        image_paths = []
+        
+        # Load from train directory
+        train_dir = os.path.join(self.data_dir, 'train')
+        if os.path.exists(train_dir):
+            for class_dir in os.listdir(train_dir):
+                class_path = os.path.join(train_dir, class_dir, 'images')
+                if os.path.isdir(class_path):
+                    for img_name in os.listdir(class_path):
+                        if img_name.endswith('.JPEG'):
+                            image_paths.append(os.path.join(class_path, img_name))
+        
+        # Load from val directory
+        val_dir = os.path.join(self.data_dir, 'val', 'images')
+        if os.path.exists(val_dir):
+            for img_name in os.listdir(val_dir):
+                if img_name.endswith('.JPEG'):
+                    image_paths.append(os.path.join(val_dir, img_name))
+        
+        return image_paths
+    
+    def __len__(self):
+        return len(self.image_paths)
+    
+    def __getitem__(self, idx):
         """
-        Uses torchvision.datasets.KMNIST to load dataset.
-        Downloads dataset if doesn't exist already.
-
         Returns:
-             torch.utils.data.TensorDataset: trainset, valset
+            image: Transformed image tensor
+            label: Always -1 (indicating unknown/open-set class)
         """
-        trainset = datasets.KMNIST('datasets/KMNIST/train/', train=True, transform=self.train_transforms,
-                                   target_transform=None, download=True)
-        valset = datasets.KMNIST('datasets/KMNIST/test/', train=False, transform=self.val_transforms,
-                                 target_transform=None, download=True)
-
-        return trainset, valset
-
-    def get_dataset_loader(self, batch_size, workers, is_gpu):
-        """
-        Defines the dataset loader for wrapped dataset
-
-        Parameters:
-            batch_size (int): Defines the batch size in data loader
-            workers (int): Number of parallel threads to be used by data loader
-            is_gpu (bool): True if CUDA is enabled so pin_memory is set to True
-
-        Returns:
-             torch.utils.data.DataLoader: train_loader, val_loader
-        """
-
-        train_loader = torch.utils.data.DataLoader(
-            self.trainset,
-            batch_size=batch_size, shuffle=True,
-            num_workers=workers, pin_memory=is_gpu, sampler=None)
-
-        val_loader = torch.utils.data.DataLoader(
-            self.valset,
-            batch_size=batch_size, shuffle=False,
-            num_workers=workers, pin_memory=is_gpu)
-
-        return train_loader, val_loader
+        img_path = self.image_paths[idx]
+        image = Image.open(img_path).convert('RGB')
+        
+        if self.transform:
+            image = self.transform(image)
+        
+        # Label -1 indicates unknown/open-set class
+        return image, -1
 
 
-class CIFAR10:
+def get_dataset(is_gpu, args):
     """
-    CIFAR-10 dataset featuring tiny 32x32 color images of
-    objects belonging to hundred different classes.
-    Dataloader implemented with torchvision.datasets.CIFAR10.
-
-    Parameters:
-        args (dict): Dictionary of (command line) arguments.
-            Needs to contain batch_size (int) and workers(int).
-        is_gpu (bool): True if CUDA is enabled.
-            Sets value of pin_memory in DataLoader.
-    Attributes:
-        train_transforms (torchvision.transforms): Composition of transforms
-            including conversion to Tensor, horizontal flips, random
-            translations of up to 10% in each direction and normalization.
-        val_transforms (torchvision.transforms): Composition of transforms
-            including conversion to Tensor and normalization.
-        trainset (torch.utils.data.TensorDataset): Training set wrapper.
-        valset (torch.utils.data.TensorDataset): Validation set wrapper.
-        train_loader (torch.utils.data.DataLoader): Training set loader with shuffling
-        val_loader (torch.utils.data.DataLoader): Validation set loader.
+    Factory function to get the appropriate dataset.
+    
+    Args:
+        is_gpu: Whether to use GPU (pin_memory)
+        args: Arguments containing dataset configuration
+            - dataset / dataset_name: Dataset name
+            - known: List of known class indices
+            - unknown: List of unknown class indices (optional)
+            - dataroot: Root directory for datasets
+            - batch_size: Batch size
+            - workers / num_workers: Number of workers
+            - patch_size: Image size (default: 28)
+            - gray_scale: Whether to use grayscale (default: False)
+        
+    Returns:
+        Dataset object with train_loader, val_loader, out_loader
     """
-
-    def __init__(self, is_gpu, args):
-        self.num_classes = 10
-        self.gray_scale = args.gray_scale
-
-        self.train_transforms, self.val_transforms = self.__get_transforms(args.patch_size)
-
-        self.trainset, self.valset = self.get_dataset()
-        self.train_loader, self.val_loader = self.get_dataset_loader(args.batch_size, args.workers, is_gpu)
-
-        self.class_to_idx = {'airplane': 0,
-                             'automobile': 1,
-                             'bird': 2,
-                             'cat': 3,
-                             'deer': 4,
-                             'dog': 5,
-                             'frog': 6,
-                             'horse': 7,
-                             'ship': 8,
-                             'truck': 9}
-
-    def __get_transforms(self, patch_size):
-        if self.gray_scale:
-            train_transforms = transforms.Compose([
-                transforms.Resize(size=(patch_size, patch_size)),
-                transforms.Grayscale(num_output_channels=1),
-                transforms.ToTensor(),
-                ])
-
-            val_transforms = transforms.Compose([
-                transforms.Resize(size=(patch_size, patch_size)),
-                transforms.Grayscale(num_output_channels=1),
-                transforms.ToTensor(),
-                ])
+    # Get dataset name (try both 'dataset' and 'dataset_name')
+    if hasattr(args, 'dataset_name'):
+        dataset_name = args.dataset_name.lower()
+    elif hasattr(args, 'dataset'):
+        dataset_name = args.dataset.lower()
+    else:
+        raise ValueError("args must have 'dataset_name' or 'dataset' attribute")
+    
+    # Check if it's a MedMNIST dataset
+    supported_datasets = ['bloodmnist', 'octmnist', 'dermamnist', 'tissuemnist']
+    medmnist_datasets = [
+        'pathmnist', 'dermamnist', 'octmnist', 'pneumoniamnist',
+        'retinamnist', 'breastmnist', 'bloodmnist', 'tissuemnist',
+        'organamnist', 'organcmnist', 'organsmnist', 'chestmnist'
+    ]
+    
+    if dataset_name in medmnist_datasets:
+        print(f"Loading MedMNIST dataset: {dataset_name}")
+        
+        # Extract parameters
+        # Known classes (required)
+        if hasattr(args, 'known'):
+            known = args.known
         else:
-            train_transforms = transforms.Compose([
-                transforms.Resize(size=(patch_size, patch_size)),
-                transforms.ToTensor(),
-            ])
+            # Default: use approximately 60% of classes as known
+            n_classes = len(INFO[dataset_name]['label'])
+            known = list(range(int(n_classes * 0.6)))
+            print(f"Warning: 'known' not specified, using default {known}")
+        
+        # Unknown classes (optional, auto-computed from known)
+        unknown = args.unknown if hasattr(args, 'unknown') else None
+        
+        dataroot = args.dataroot if hasattr(args, 'dataroot') else './data'
+        batch_size = args.batch_size if hasattr(args, 'batch_size') else 128
+        num_workers = args.workers if hasattr(args, 'workers') else (args.num_workers if hasattr(args, 'num_workers') else 4)
+        patch_size = args.patch_size if hasattr(args, 'patch_size') else 28
+        gray_scale = args.gray_scale if hasattr(args, 'gray_scale') else False
+        
+        # Create dataset
+        dataset = MedMNIST(
+            known=known,
+            unknown=unknown,
+            dataroot=dataroot,
+            use_gpu=is_gpu,
+            num_workers=num_workers,
+            batch_size=batch_size,
+            patch_size=patch_size,
+            gray_scale=gray_scale,
+            dataset_name=dataset_name
+        )
+        
+        return dataset
+    else:
+        raise ValueError(f"Unknown dataset: {dataset_name}. Supported: {medmnist_datasets}")
 
-            val_transforms = transforms.Compose([
-                transforms.Resize(size=(patch_size, patch_size)),
-                transforms.ToTensor(),
-            ])
-
-        return train_transforms, val_transforms
-
-    def get_dataset(self):
-        """
-        Uses torchvision.datasets.CIFAR10 to load dataset.
-        Downloads dataset if doesn't exist already.
-        Returns:
-             torch.utils.data.TensorDataset: trainset, valset
-        """
-
-        trainset = datasets.CIFAR10('datasets/CIFAR10/train/', train=True, transform=self.train_transforms,
-                                    target_transform=None, download=True)
-        valset = datasets.CIFAR10('datasets/CIFAR10/test/', train=False, transform=self.val_transforms,
-                                  target_transform=None, download=True)
-
-        return trainset, valset
-
-    def get_dataset_loader(self, batch_size, workers, is_gpu):
-        """
-        Defines the dataset loader for wrapped dataset
-        Parameters:
-            batch_size (int): Defines the batch size in data loader
-            workers (int): Number of parallel threads to be used by data loader
-            is_gpu (bool): True if CUDA is enabled so pin_memory is set to True
-        Returns:
-             torch.utils.data.TensorDataset: trainset, valset
-        """
-
-        train_loader = torch.utils.data.DataLoader(
-            self.trainset,
-            batch_size=batch_size, shuffle=True,
-            num_workers=workers, pin_memory=is_gpu, sampler=None)
-
-        val_loader = torch.utils.data.DataLoader(
-            self.valset,
-            batch_size=batch_size, shuffle=False,
-            num_workers=workers, pin_memory=is_gpu)
-
-        return train_loader, val_loader
-
-
-class CIFAR100:
-    """
-    CIFAR-100 dataset featuring tiny 32x32 color images of
-    objects belonging to hundred different classes.
-    Dataloader implemented with torchvision.datasets.CIFAR100.
-
-    Parameters:
-        args (dict): Dictionary of (command line) arguments.
-            Needs to contain batch_size (int) and workers(int).
-        is_gpu (bool): True if CUDA is enabled.
-            Sets value of pin_memory in DataLoader.
-    Attributes:
-        train_transforms (torchvision.transforms): Composition of transforms
-            including conversion to Tensor, horizontal flips, random
-            translations of up to 10% in each direction and normalization.
-        val_transforms (torchvision.transforms): Composition of transforms
-            including conversion to Tensor and normalization.
-        trainset (torch.utils.data.TensorDataset): Training set wrapper.
-        valset (torch.utils.data.TensorDataset): Validation set wrapper.
-        train_loader (torch.utils.data.DataLoader): Training set loader with shuffling.
-        val_loader (torch.utils.data.DataLoader): Validation set loader.
-    """
-
-    def __init__(self, is_gpu, args):
-        self.num_classes = 100
-        self.gray_scale = args.gray_scale
-
-        self.train_transforms, self.val_transforms = self.__get_transforms(args.patch_size)
-
-        self.trainset, self.valset = self.get_dataset()
-        self.train_loader, self.val_loader = self.get_dataset_loader(args.batch_size, args.workers, is_gpu)
-
-        self.class_to_idx = {'apples': 0,
-                             'aquariumfish': 1,
-                             'baby': 2,
-                             'bear': 3,
-                             'beaver': 4,
-                             'bed': 5,
-                             'bee': 6,
-                             'beetle': 7,
-                             'bicycle': 8,
-                             'bottles': 9,
-                             'bowls': 10,
-                             'boy': 11,
-                             'bridge': 12,
-                             'bus': 13,
-                             'butterfly': 14,
-                             'camel': 15,
-                             'cans': 16,
-                             'castle': 17,
-                             'caterpillar': 18,
-                             'cattle': 19,
-                             'chair': 20,
-                             'chimpanzee': 21,
-                             'clock': 22,
-                             'cloud': 23,
-                             'cockroach': 24,
-                             'computerkeyboard': 25,
-                             'couch': 26,
-                             'crab': 27,
-                             'crocodile': 28,
-                             'cups': 29,
-                             'dinosaur': 30,
-                             'dolphin': 31,
-                             'elephant': 32,
-                             'flatfish': 33,
-                             'forest': 34,
-                             'fox': 35,
-                             'girl': 36,
-                             'hamster': 37,
-                             'house': 38,
-                             'kangaroo': 39,
-                             'lamp': 40,
-                             'lawnmower': 41,
-                             'leopard': 42,
-                             'lion': 43,
-                             'lizard': 44,
-                             'lobster': 45,
-                             'man': 46,
-                             'maple': 47,
-                             'motorcycle': 48,
-                             'mountain': 49,
-                             'mouse': 50,
-                             'mushrooms': 51,
-                             'oak': 52,
-                             'oranges': 53,
-                             'orchids': 54,
-                             'otter': 55,
-                             'palm': 56,
-                             'pears': 57,
-                             'pickuptruck': 58,
-                             'pine': 59,
-                             'plain': 60,
-                             'plates': 61,
-                             'poppies': 62,
-                             'porcupine': 63,
-                             'possum': 64,
-                             'rabbit': 65,
-                             'raccoon': 66,
-                             'ray': 67,
-                             'road': 68,
-                             'rocket': 69,
-                             'roses': 70,
-                             'sea': 71,
-                             'seal': 72,
-                             'shark': 73,
-                             'shrew': 74,
-                             'skunk': 75,
-                             'skyscraper': 76,
-                             'snail': 77,
-                             'snake': 78,
-                             'spider': 79,
-                             'squirrel': 80,
-                             'streetcar': 81,
-                             'sunflowers': 82,
-                             'sweetpeppers': 83,
-                             'table': 84,
-                             'tank': 85,
-                             'telephone': 86,
-                             'television': 87,
-                             'tiger': 88,
-                             'tractor': 89,
-                             'train': 90,
-                             'trout': 91,
-                             'tulips': 92,
-                             'turtle': 93,
-                             'wardrobe': 94,
-                             'whale': 95,
-                             'willow': 96,
-                             'wolf': 97,
-                             'woman': 98,
-                             'worm': 99}
-
-    def __get_transforms(self, patch_size):
-        if self.gray_scale:
-            train_transforms = transforms.Compose([
-                transforms.Resize(size=(patch_size, patch_size)),
-                transforms.Grayscale(num_output_channels=1),
-                transforms.ToTensor(),
-                ])
-
-            val_transforms = transforms.Compose([
-                transforms.Resize(size=(patch_size, patch_size)),
-                transforms.Grayscale(num_output_channels=1),
-                transforms.ToTensor(),
-                ])
-        else:
-            train_transforms = transforms.Compose([
-                transforms.Resize(size=(patch_size, patch_size)),
-                transforms.ToTensor(),
-            ])
-
-            val_transforms = transforms.Compose([
-                transforms.Resize(size=(patch_size, patch_size)),
-                transforms.ToTensor(),
-            ])
-
-        return train_transforms, val_transforms
-
-    def get_dataset(self):
-        """
-        Uses torchvision.datasets.CIFAR100 to load dataset.
-        Downloads dataset if doesn't exist already.
-        Returns:
-             torch.utils.data.TensorDataset: trainset, valset
-        """
-
-        trainset = datasets.CIFAR100('datasets/CIFAR100/train/', train=True, transform=self.train_transforms,
-                                     target_transform=None, download=True)
-        valset = datasets.CIFAR100('datasets/CIFAR100/test/', train=False, transform=self.val_transforms,
-                                   target_transform=None, download=True)
-
-        return trainset, valset
-
-    def get_dataset_loader(self, batch_size, workers, is_gpu):
-        """
-        Defines the dataset loader for wrapped dataset
-        Parameters:
-            batch_size (int): Defines the batch size in data loader
-            workers (int): Number of parallel threads to be used by data loader
-            is_gpu (bool): True if CUDA is enabled so pin_memory is set to True
-        Returns:
-             torch.utils.data.TensorDataset: trainset, valset
-        """
-
-        train_loader = torch.utils.data.DataLoader(
-            self.trainset,
-            batch_size=batch_size, shuffle=True,
-            num_workers=workers, pin_memory=is_gpu, sampler=None)
-
-        val_loader = torch.utils.data.DataLoader(
-            self.valset,
-            batch_size=batch_size, shuffle=False,
-            num_workers=workers, pin_memory=is_gpu)
-
-        return train_loader, val_loader
-
-
-class SVHN:
-    """
-    Google Street View House Numbers SVHN dataset featuring tiny 32x32 color images of
-    digits belonging to 10 different classes (0-9).
-    Dataloader implemented with torchvision.datasets.SVHN.
-
-    Parameters:
-        args (dict): Dictionary of (command line) arguments.
-            Needs to contain batch_size (int) and workers(int).
-        is_gpu (bool): True if CUDA is enabled.
-            Sets value of pin_memory in DataLoader.
-    Attributes:
-        train_transforms (torchvision.transforms): Composition of transforms
-            including conversion to Tensor, horizontal flips, random
-            translations of up to 10% in each direction and normalization.
-        val_transforms (torchvision.transforms): Composition of transforms
-            including conversion to Tensor and normalization.
-        trainset (torch.utils.data.TensorDataset): Training set wrapper.
-        valset (torch.utils.data.TensorDataset): Validation set wrapper.
-        train_loader (torch.utils.data.DataLoader): Training set loader with shuffling.
-        val_loader (torch.utils.data.DataLoader): Validation set loader.
-    """
-
-    def __init__(self, is_gpu, args):
-        self.num_classes = 10
-        self.gray_scale = args.gray_scale
-
-        self.train_transforms, self.val_transforms = self.__get_transforms(args.patch_size)
-
-        self.trainset, self.valset = self.get_dataset()
-        self.train_loader, self.val_loader = self.get_dataset_loader(args.batch_size, args.workers, is_gpu)
-
-        self.class_to_idx = {'0': 0,
-                             '1': 1,
-                             '2': 2,
-                             '3': 3,
-                             '4': 4,
-                             '5': 5,
-                             '6': 6,
-                             '7': 7,
-                             '8': 8,
-                             '9': 9}
-
-    def __get_transforms(self, patch_size):
-        if self.gray_scale:
-            train_transforms = transforms.Compose([
-                transforms.Resize(size=(patch_size, patch_size)),
-                transforms.Grayscale(num_output_channels=1),
-                transforms.ToTensor(),
-                ])
-
-            val_transforms = transforms.Compose([
-                transforms.Resize(size=(patch_size, patch_size)),
-                transforms.Grayscale(num_output_channels=1),
-                transforms.ToTensor(),
-                ])
-        else:
-            train_transforms = transforms.Compose([
-                transforms.Resize(size=(patch_size, patch_size)),
-                transforms.ToTensor(),
-            ])
-
-            val_transforms = transforms.Compose([
-                transforms.Resize(size=(patch_size, patch_size)),
-                transforms.ToTensor(),
-            ])
-
-        return train_transforms, val_transforms
-
-    def get_dataset(self):
-        """
-        Uses torchvision.datasets.CIFAR100 to load dataset.
-        Downloads dataset if doesn't exist already.
-        Returns:
-             torch.utils.data.TensorDataset: trainset, valset
-        """
-
-        trainset = datasets.SVHN('datasets/SVHN/train/', split='train', transform=self.train_transforms,
-                                 target_transform=None, download=True)
-        valset = datasets.SVHN('datasets/SVHN/test/', split='test', transform=self.val_transforms,
-                               target_transform=None, download=True)
-        extraset = datasets.SVHN('datasets/SVHN/extra', split='extra', transform=self.train_transforms,
-                                 target_transform=None, download=True)
-
-        trainset = torch.utils.data.ConcatDataset([trainset, extraset])
-
-        return trainset, valset
-
-    def get_dataset_loader(self, batch_size, workers, is_gpu):
-        """
-        Defines the dataset loader for wrapped dataset
-        Parameters:
-            batch_size (int): Defines the batch size in data loader
-            workers (int): Number of parallel threads to be used by data loader
-            is_gpu (bool): True if CUDA is enabled so pin_memory is set to True
-        Returns:
-             torch.utils.data.TensorDataset: trainset, valset
-        """
-
-        train_loader = torch.utils.data.DataLoader(
-            self.trainset,
-            batch_size=batch_size, shuffle=True,
-            num_workers=workers, pin_memory=is_gpu, sampler=None)
-
-        val_loader = torch.utils.data.DataLoader(
-            self.valset,
-            batch_size=batch_size, shuffle=False,
-            num_workers=workers, pin_memory=is_gpu)
-
-        return train_loader, val_loader
-
-
-class Flower5:
-    """
-    Oxford Flower dataset .
-    Parameters:
-        args (dict): Dictionary of (command line) arguments.
-            Needs to contain batch_size (int) and workers(int).
-        is_gpu (bool): True if CUDA is enabled.
-            Sets value of pin_memory in DataLoader.
-    Attributes:
-        train_transforms (torchvision.transforms): Composition of transforms
-            including conversion to Tensor, repeating gray-scale image to
-            three channel for consistent use with different architectures
-            and normalization.
-        val_transforms (torchvision.transforms): Composition of transforms
-            including conversion to Tensor, repeating gray-scale image to
-            three channel for consistent use with different architectures
-            and normalization.
-        trainset (torch.utils.data.TensorDataset): Training set wrapper.
-        valset (torch.utils.data.TensorDataset): Validation set wrapper.
-        train_loader (torch.utils.data.DataLoader): Training set loader with shuffling.
-        val_loader (torch.utils.data.DataLoader): Validation set loader.
-        class_to_idx (dict): Defines mapping from class names to integers.
-    """
-
-    def __init__(self, is_gpu, args):
-        self.num_classes = 5
-        self.gray_scale = args.gray_scale
-
-        self.train_transforms, self.val_transforms = self.__get_transforms(args.patch_size)
-
-        self.trainset, self.valset = self.get_dataset()
-        self.train_loader, self.val_loader = self.get_dataset_loader(args.batch_size, args.workers, is_gpu)
-
-        self.class_to_idx = {'Sunflower': 0,
-                             'Daisy': 1,
-                             'Iris': 2,
-                             'Daffodil': 3,
-                             'Pansy': 4}
-
-    def __get_transforms(self, patch_size):
-        # optionally scale the images and repeat to three channels
-        # important note: these transforms will only be called once during the
-        # creation of the dataset and no longer in the incremental datasets that inherit.
-        # Adding data augmentation here is thus the wrong place!
-        resize = patch_size + int(math.ceil(patch_size * 0.1))
-        if self.gray_scale:
-            train_transforms = transforms.Compose([
-                transforms.Resize(size=resize),
-                transforms.CenterCrop(patch_size),
-                transforms.Grayscale(num_output_channels=1),
-                transforms.ToTensor(),
-            ])
-
-            val_transforms = transforms.Compose([
-                transforms.Resize(size=resize),
-                transforms.CenterCrop(patch_size),
-                transforms.Grayscale(num_output_channels=1),
-                transforms.ToTensor(),
-            ])
-        else:
-
-            train_transforms = transforms.Compose([
-                transforms.Resize(size=resize),
-                transforms.CenterCrop(patch_size),
-                transforms.ToTensor(),
-            ])
-            val_transforms = transforms.Compose([
-                transforms.Resize(size=resize),
-                transforms.CenterCrop(patch_size),
-                transforms.ToTensor(),
-            ])
-
-        return train_transforms, val_transforms
-
-    def get_dataset(self):
-        """
-        Uses torchvision.datasets.ImageFoder to load dataset.
-        Please download the dataset at https://www.robots.ox.ac.uk/~vgg/data/flowers/
-        Returns:
-             torch.utils.data.TensorDataset: trainset, valset
-        """
-
-        root = '.'
-        for cur_file in ['datasets', 'flower_data', '5flowers_class']:
-            root = os.path.join(root, cur_file)
-            if not os.path.exists(root):
-                os.path.mkdir(root)
-
-        trainset = datasets.ImageFolder(root=root + '/train/', transform=self.train_transforms,
-                                        target_transform=None)
-        valset = datasets.ImageFolder(root=root + '/valid/', transform=self.val_transforms,
-                                      target_transform=None)
-
-        return trainset, valset
-
-    def get_dataset_loader(self, batch_size, workers, is_gpu):
-        """
-        Defines the dataset loader for wrapped dataset
-        Parameters:
-            batch_size (int): Defines the batch size in data loader
-            workers (int): Number of parallel threads to be used by data loader
-            is_gpu (bool): True if CUDA is enabled so pin_memory is set to True
-        Returns:
-             torch.utils.data.DataLoader: train_loader, val_loader
-        """
-
-        train_loader = torch.utils.data.DataLoader(
-            self.trainset,
-            batch_size=batch_size, shuffle=True,
-            num_workers=workers, pin_memory=is_gpu, sampler=None)
-
-        val_loader = torch.utils.data.DataLoader(
-            self.valset,
-            batch_size=batch_size, shuffle=False,
-            num_workers=workers, pin_memory=is_gpu)
-
-        return train_loader, val_loader
