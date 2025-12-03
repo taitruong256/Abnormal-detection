@@ -32,11 +32,9 @@ def parse_args():
     parser.add_argument('--epochs', default=10, type=int, help='number of total epochs to run. Default: 10')
     parser.add_argument('--var-beta', default=0.1, type=float, help='weight term for KLD loss. Default: 0.1')
     parser.add_argument('-pf', '--print-freq', default=100, type=int, help='print frequency. Default: 100')
-    parser.add_argument('--max-train-samples', default=450, type=int, help='maximum number of training samples. Default: 450')
-    parser.add_argument('--max-test-samples', default=50, type=int, help='maximum number of test samples. Default: 50')
     parser.add_argument('--visualization-epoch', default=20, type=int, help='number of epochs after which generations/reconstructions are visualized/saved. Default: 20')
     parser.add_argument('--autoregression', default=False, type=bool, help='use autoregression. Default: False')
-    parser.add_argument('--max-samples', default=None, type=int, help='Limit dataset to first N samples for quick testing. Default: None (use all data)')
+    parser.add_argument('--max-samples', default=None, type=int, help='Limit dataset to first N samples for quick testing (train=N, val=N/4). Default: None (use all data)')
     return parser.parse_args()
 
 if __name__ == "__main__":
@@ -74,10 +72,8 @@ if __name__ == "__main__":
     logger.info(f"  WRN Embedding Size: {args.wrn_embedding_size}")
     logger.info(f"  Total Epochs: {args.epochs}")
     logger.info(f"  Var Beta: {args.var_beta}")
-    logger.info(f"  Max Train Samples: {args.max_train_samples if args.max_train_samples else 'All'}")
-    logger.info(f"  Max Test Samples: {args.max_test_samples if args.max_test_samples else '20% of train'}")
     if args.max_samples is not None:
-        logger.info(f"  Max Samples (Testing Mode): {args.max_samples}")
+        logger.info(f"  Max Samples (Testing Mode): Train={args.max_samples}, Val={args.max_samples // 4}")
     
     # Setup known classes for MedMNIST datasets
     medmnist_datasets = ['bloodmnist', 'octmnist', 'dermamnist', 'tissuemnist']
