@@ -75,7 +75,6 @@ class Random300K_Images(Dataset):
             self.transform = transforms.Compose([
                 transforms.Resize((28, 28)),
                 transforms.ToTensor(),
-                transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
             ])
     
     def __len__(self):
@@ -178,6 +177,8 @@ class MedMNIST:
             train_transforms, val_transforms
         """
         # Data augmentation for training
+        # NOTE: OpenVAE uses ToTensor only (no Normalize), keeping data in [0, 1] range
+        # This is required for BCEWithLogitsLoss to work properly
         if gray_scale:
             train_transforms = transforms.Compose([
                 transforms.Resize((patch_size, patch_size)),
@@ -188,14 +189,12 @@ class MedMNIST:
                 transforms.RandomAffine(degrees=0, translate=(0.05, 0.05), scale=(0.95, 1.05)),
                 transforms.RandomApply([transforms.RandomRotation(15)], p=0.5),
                 transforms.ToTensor(),
-                transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
             ])
             
             val_transforms = transforms.Compose([
                 transforms.Resize((patch_size, patch_size)),
                 transforms.Grayscale(3),
                 transforms.ToTensor(),
-                transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
             ])
         else:
             train_transforms = transforms.Compose([
@@ -207,14 +206,12 @@ class MedMNIST:
                 transforms.RandomAffine(degrees=0, translate=(0.05, 0.05), scale=(0.95, 1.05)),
                 transforms.RandomApply([transforms.RandomRotation(15)], p=0.5),
                 transforms.ToTensor(),
-                transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
             ])
             
             val_transforms = transforms.Compose([
                 transforms.Resize((patch_size, patch_size)),
                 transforms.Lambda(lambda x: x if x.mode == 'RGB' else x.convert('RGB')),
                 transforms.ToTensor(),
-                transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
             ])
         
         return train_transforms, val_transforms
@@ -347,7 +344,6 @@ class TinyImageNetOpenSet(Dataset):
             self.transform = transforms.Compose([
                 transforms.Resize((patch_size, patch_size)),
                 transforms.ToTensor(),
-                transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
             ])
         else:
             self.transform = transform
