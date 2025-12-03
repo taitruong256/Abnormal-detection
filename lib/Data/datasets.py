@@ -500,6 +500,42 @@ def get_dataset(is_gpu, args):
             dataset_name=dataset_name
         )
         
+        # Limit dataset if max_samples is specified (for quick testing)
+        if hasattr(args, 'max_samples') and args.max_samples is not None:
+            from torch.utils.data import Subset
+            print(f"\n⚠️  Limiting dataset to first {args.max_samples} samples for testing")
+            
+            # Limit training set
+            original_train_size = len(dataset.trainset)
+            train_indices = list(range(min(args.max_samples, original_train_size)))
+            dataset.trainset = Subset(dataset.trainset, train_indices)
+            
+            # Limit validation set (use smaller portion)
+            val_samples = min(args.max_samples // 4, len(dataset.valset))
+            val_indices = list(range(val_samples))
+            dataset.valset = Subset(dataset.valset, val_indices)
+            
+            # Recreate data loaders with limited datasets
+            from torch.utils.data import DataLoader
+            dataset.train_loader = DataLoader(
+                dataset.trainset,
+                batch_size=batch_size,
+                shuffle=True,
+                num_workers=num_workers,
+                pin_memory=is_gpu
+            )
+            
+            dataset.val_loader = DataLoader(
+                dataset.valset,
+                batch_size=batch_size,
+                shuffle=False,
+                num_workers=num_workers,
+                pin_memory=is_gpu
+            )
+            
+            print(f"  Train: {original_train_size} -> {len(dataset.trainset)} samples")
+            print(f"  Val: {len(dataset.valset)} samples")
+        
         return dataset
     else:
         raise ValueError(f"Unknown dataset: {dataset_name}. Supported: {medmnist_datasets}")

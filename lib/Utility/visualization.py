@@ -63,11 +63,12 @@ def visualize_image_grid(images, writer, count, name, save_path):
     """
     import logging
     logger = logging.getLogger()
+    logger.info(f"Creating image grid: {name} (epoch {count})...")
     size = images.size(0)
     save_file = os.path.join(save_path, name + '_epoch_' + str(count) + '.png')
     torchvision.utils.save_image(images, save_file,
                                  nrow=int(math.sqrt(size)), padding=5)
-    logger.info(f'Image grid saved at: {save_file}')
+    logger.info(f'✓ Image grid saved: {save_file}')
 
 
 def visualize_confusion(writer, step, matrix, class_dict, save_path):
@@ -86,6 +87,8 @@ def visualize_confusion(writer, step, matrix, class_dict, save_path):
     """
     import logging
     logger = logging.getLogger()
+    
+    logger.info(f"Creating confusion matrix (step {step})...")
 
     all_categories = sorted(class_dict, key=class_dict.get)
 
@@ -108,22 +111,26 @@ def visualize_confusion(writer, step, matrix, class_dict, save_path):
 
     save_file = os.path.join(save_path, 'confusion_epoch_' + str(step) + '.png')
     plt.savefig(save_file, bbox_inches='tight')
-    logger.info(f'Confusion matrix saved at: {save_file}')
     plt.close()
+    logger.info(f'✓ Confusion matrix saved: {save_file}')
 
 
 def visualize_dataset_in_2d_embedding(writer, encoding_list, dataset_name, save_path, task=1):
     """
-    Visualization of 2-D latent embedding. Is saved to both hard-disc as well as TensorBoard.
+    Visualization of 2-D latent embedding. Is saved to hard-disc as image file.
 
     Parameters:
-        writer (tensorboard.SummaryWriter): TensorBoard SummaryWriter instance.
+        writer: Deprecated parameter (kept for backward compatibility, can be None).
         encoding_list (list): List of Tensors containing encoding values
         dataset_name (str): Dataset name.
         save_path (str): Path used for saving.
         task (int): task counter. Used for naming.
     """
+    import logging
+    logger = logging.getLogger()
 
+    logger.info(f"Creating 2D latent space visualization for {dataset_name} (task {task})...")
+    
     num_classes = len(encoding_list)
     encoded_classes = []
     for i in range(len(encoding_list)):
@@ -133,7 +140,8 @@ def visualize_dataset_in_2d_embedding(writer, encoding_list, dataset_name, save_
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
             encoding_list[i] = torch.Tensor(encoding_list[i]).to(device)
             encoded_classes.append([i] * 0)
-    encoded_classes = np.concatenate(np.asarray(encoded_classes), axis=0)
+    # Fix: concatenate the list of lists properly
+    encoded_classes = np.concatenate([np.array(cls) for cls in encoded_classes if len(cls) > 0], axis=0)
     encoding = torch.cat(encoding_list, dim=0)
 
     if encoding.size(1) != 2:
@@ -162,9 +170,12 @@ def visualize_dataset_in_2d_embedding(writer, encoding_list, dataset_name, save_
 
     plt.tight_layout()
 
-    writer.add_figure('latent_embedding', fig, global_step=task)
-    plt.savefig(os.path.join(save_path, dataset_name + '_latent_2d_embedding_task_' +
-                             str(task) + '.png'), bbox_inches='tight')
+    # Save to file (ignore writer/TensorBoard)
+    save_file = os.path.join(save_path, dataset_name + '_latent_2d_embedding_task_' +
+                             str(task) + '.png')
+    plt.savefig(save_file, bbox_inches='tight')
+    plt.close(fig)
+    logger.info(f"✓ 2D latent space visualization saved: {save_file}")
 
 
 def visualize_means(means, classes_order, data_name, save_path, name):

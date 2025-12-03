@@ -15,7 +15,8 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Train and evaluate VAE model with open set recognition")
     parser.add_argument('-b', '--batch-size', default=16, type=int, help='mini-batch size. Default: 16')
     parser.add_argument('--learning-rate', default=0.001, type=float, help='initial learning rate. Default: 0.001')
-    parser.add_argument('--dataset', type=str, default='MNIST', help="Dataset to use for training and evaluation.")
+    parser.add_argument('--dataset', type=str, default='bloodmnist', help="Dataset to use for training and evaluation.")
+    parser.add_argument('--dataroot', type=str, default='./data', help='Data root directory. Default: ./data')
     parser.add_argument('--gray-scale', default=False, type=bool, help='use gray scale images. Default: False. If false, single channel images will be repeated to three channels.')
     parser.add_argument('-p', '--patch-size', default=28, type=int, help='patch size for crops. Default: 28')
     parser.add_argument('-j', '--workers', default=4, type=int, help='number of data loading workers. Default: 4')
@@ -28,12 +29,14 @@ def parse_args():
     parser.add_argument('--var-samples', default=1, type=int, help='number of samples for the expectation in variational training. Default: 1')
     parser.add_argument('--var-latent-dim', default=60, type=int, help='Dimensionality of latent space. Default 60')
     parser.add_argument('--wrn-embedding-size', type=int, default=48, help='number of output channels in the first wrn layer if widen factor is not being')
-    parser.add_argument('--epochs', default=10, type=int, help='number of total epochs to run. Default: 120')
+    parser.add_argument('--epochs', default=10, type=int, help='number of total epochs to run. Default: 10')
     parser.add_argument('--var-beta', default=0.1, type=float, help='weight term for KLD loss. Default: 0.1')
     parser.add_argument('-pf', '--print-freq', default=100, type=int, help='print frequency. Default: 100')
-    parser.add_argument('--max-train-samples', default=450, type=int, help='maximum number of training samples. Default: None (use all samples)')
-    parser.add_argument('--max-test-samples', default=50, type=int, help='maximum number of test samples. Default: None (use 20%% of training samples)')
+    parser.add_argument('--max-train-samples', default=450, type=int, help='maximum number of training samples. Default: 450')
+    parser.add_argument('--max-test-samples', default=50, type=int, help='maximum number of test samples. Default: 50')
     parser.add_argument('--visualization-epoch', default=20, type=int, help='number of epochs after which generations/reconstructions are visualized/saved. Default: 20')
+    parser.add_argument('--autoregression', default=False, type=bool, help='use autoregression. Default: False')
+    parser.add_argument('--max-samples', default=None, type=int, help='Limit dataset to first N samples for quick testing. Default: None (use all data)')
     return parser.parse_args()
 
 if __name__ == "__main__":
@@ -73,9 +76,27 @@ if __name__ == "__main__":
     logger.info(f"  Var Beta: {args.var_beta}")
     logger.info(f"  Max Train Samples: {args.max_train_samples if args.max_train_samples else 'All'}")
     logger.info(f"  Max Test Samples: {args.max_test_samples if args.max_test_samples else '20% of train'}")
+    if args.max_samples is not None:
+        logger.info(f"  Max Samples (Testing Mode): {args.max_samples}")
     
-    data_init_method = getattr(datasets, args.dataset)
-    dataset = data_init_method(torch.cuda.is_available(), args)
+    # Setup known classes for MedMNIST datasets
+    medmnist_datasets = ['bloodmnist', 'octmnist', 'dermamnist', 'tissuemnist']
+    if args.dataset.lower() in medmnist_datasets:
+        logger.info(f"\nLoading MedMNIST dataset: {args.dataset}")
+        # Set known classes based on dataset
+        if args.dataset.lower() == 'bloodmnist':
+            args.known = [0, 1, 2, 3, 4]
+        elif args.dataset.lower() == 'octmnist':
+            args.known = [0, 1, 2]
+        elif args.dataset.lower() == 'dermamnist':
+            args.known = [0, 1, 2, 3]
+        elif args.dataset.lower() == 'tissuemnist':
+            args.known = [0, 1, 2, 3, 4]
+        logger.info(f"  Known classes: {args.known}")
+        dataset = datasets.get_dataset(torch.cuda.is_available(), args)
+    else:
+        data_init_method = getattr(datasets, args.dataset)
+        dataset = data_init_method(torch.cuda.is_available(), args)
 
     # import model from architectures class
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

@@ -109,9 +109,6 @@ def validate(Dataset, model, criterion, epoch, metrics_logger, device, save_path
             if i == (len(Dataset.val_loader) - 1) and epoch % args.visualization_epoch == 0 and (epoch > 0):
                 # generation
                 gen = model.generate()
-
-                if args.autoregression:
-                    gen = model.pixelcnn.generate(gen)
                 visualize_image_grid(gen, None, epoch + 1, 'generation_snapshot', save_path)
 
             # Print progress
