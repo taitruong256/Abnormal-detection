@@ -229,6 +229,9 @@ class MedMNIST:
         Returns:
             trainset, valset, outset (filtered datasets)
         """
+        # Create dataroot directory if it doesn't exist
+        os.makedirs(dataroot, exist_ok=True)
+        
         # Get the dataset class
         dataset_mapping = {
             'pathmnist': PathMNIST,
