@@ -141,10 +141,19 @@ def validate(Dataset, model, criterion, epoch, metrics_logger, device, save_path
         # visualize the confusion matrix (heatmap with actual counts - known classes only)
         known_classes = Dataset.known if hasattr(Dataset, 'known') else None
         visualize_confusion_heatmap(None, epoch + 1, confusion.value_counts(), Dataset.class_to_idx, save_path, known_classes)
+        
+        # Save task-specific confusion matrices for continual learning
+        if args.incremental_data:
+            task_num = (epoch + 1) // args.epochs
+            num_classes = model.num_classes
+            logger.info(f'\nSaving Task {task_num} confusion matrices ({num_classes} classes)...')
+            visualize_confusion(None, f"task{task_num}_{num_classes}classes", confusion.value(), Dataset.class_to_idx, save_path)
+            visualize_confusion_heatmap(None, f"task{task_num}_{num_classes}classes", confusion.value_counts(), Dataset.class_to_idx, save_path, known_classes)
+            logger.info(f'  ✓ Task {task_num} confusion matrices saved')
     
     # Visualize 2D latent space if latent_dim is 2
     if hasattr(model, 'latent_dim') and model.latent_dim == 2:
-        if (epoch + 1) % args.visualization_epoch == 0 or (epoch + 1) == args.epochs:
+        if (epoch + 1) % args.visualization_epoch == 0 or (epoch + 1) == args.epochs or (args.incremental_data and (epoch + 1) % args.epochs == 0 and epoch > 0):
             logger.info(f'Creating 2D latent space visualization (epoch {epoch + 1})...')
             
             # Encode entire validation dataset and organize by class
@@ -184,5 +193,19 @@ def validate(Dataset, model, criterion, epoch, metrics_logger, device, save_path
                 task=epoch + 1
             )
             logger.info(f'✓ 2D latent space visualization saved for epoch {epoch + 1}')
+            
+            # Save task-specific 2D embedding for continual learning
+            if args.incremental_data and (epoch + 1) % args.epochs == 0 and epoch > 0:
+                task_num = (epoch + 1) // args.epochs
+                num_classes = model.num_classes
+                
+                visualize_dataset_in_2d_embedding(
+                    writer=None,
+                    encoding_list=encoding_list, 
+                    dataset_name=f"{dataset_name}_task{task_num}_{num_classes}classes",
+                    save_path=save_path,
+                    task=task_num
+                )
+                logger.info(f'  ✓ Task {task_num} 2D embedding saved')
 
     return top1.avg, losses.avg
