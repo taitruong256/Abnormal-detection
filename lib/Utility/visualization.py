@@ -120,6 +120,101 @@ def visualize_confusion(writer, step, matrix, class_dict, save_path):
     logger.info(f'✓ Confusion matrix saved: {save_file}')
 
 
+def visualize_confusion_heatmap(writer, step, matrix, class_dict, save_path, known_classes=None):
+    """
+    Generate a confusion matrix heatmap with auto-scaled cell sizes.
+    Only shows known/closed-set classes if known_classes is provided.
+    
+    Parameters:
+        writer: Deprecated parameter (kept for backward compatibility, can be None).
+        step (int): Counter usually specifying steps/epochs/time.
+        matrix (numpy.array): Square-shaped confusion matrix.
+        class_dict (dict): Dictionary mapping class names to indices.
+        save_path (str): Path used for saving.
+        known_classes (list): List of known class indices to display. If None, show all classes.
+    """
+    import logging
+    logger = logging.getLogger()
+    
+    logger.info(f"Creating confusion matrix heatmap (step {step})...")
+    
+    # If known_classes is provided, filter matrix to only show those classes
+    if known_classes is not None:
+        # Extract only known classes from matrix
+        matrix_filtered = matrix[np.ix_(known_classes, known_classes)]
+        # Get class names for known classes only
+        all_class_names = sorted(class_dict, key=class_dict.get)
+        class_names = [all_class_names[i] for i in known_classes]
+        num_classes = len(known_classes)
+        
+        # Log confusion matrix for known classes
+        logger.info(f"\n{'='*60}")
+        logger.info(f"Confusion Matrix (Known/Closed-Set Classes Only) - Epoch {step}")
+        logger.info(f"Known classes: {known_classes}")
+        logger.info(f"{'='*60}")
+        logger.info(f"{'True/Pred':<12}" + "".join([f"{name:>8}" for name in class_names]))
+        logger.info("-" * (12 + 8 * num_classes))
+        for i, true_class in enumerate(class_names):
+            row_str = f"{true_class:<12}" + "".join([f"{matrix_filtered[i, j]:>8d}" for j in range(num_classes)])
+            logger.info(row_str)
+        logger.info(f"{'='*60}\n")
+    else:
+        # Use full matrix
+        matrix_filtered = matrix
+        class_names = sorted(class_dict, key=class_dict.get)
+        num_classes = len(class_names)
+
+    matrix_int = matrix_filtered.astype(int)
+    max_value = np.max(matrix_int) if np.max(matrix_int) > 0 else 1
+
+    cell_size = 1.1
+    fig_w = max(8, num_classes * cell_size)
+    fig_h = max(8, num_classes * cell_size)
+
+    fig, ax = plt.subplots(figsize=(fig_w, fig_h))
+
+    annot_font = max(6, min(18, 220 // max(num_classes, 1)))
+    tick_font = max(6, min(16, 180 // max(num_classes, 1)))
+
+    sns.heatmap(
+        matrix_int,
+        annot=True,
+        fmt="d",
+        cmap="Blues",
+        square=True,
+        vmin=0,
+        vmax=max_value,
+        xticklabels=class_names,
+        yticklabels=class_names,
+        linewidths=0.5,
+        linecolor="gray",
+        annot_kws={"size": annot_font},
+        cbar_kws={"label": "Sample Count"},
+        ax=ax
+    )
+
+    ax.set_aspect('equal')         
+    ax.set_xlim(0, num_classes)
+    ax.set_ylim(num_classes, 0)
+
+    ax.set_xlabel("Predicted Class", fontsize=16, fontweight="bold")
+    ax.set_ylabel("True Class", fontsize=16, fontweight="bold")
+    
+    title_suffix = " (Known Classes Only)" if known_classes is not None else ""
+    ax.set_title(f"Confusion Matrix – Epoch {step}{title_suffix}", fontsize=18, fontweight="bold", pad=20)
+
+    ax.tick_params(axis="both", labelsize=tick_font)
+
+    plt.tight_layout(pad=2.0)
+
+    out_file = os.path.join(save_path, f"confusion_heatmap_epoch_{step}.png")
+    plt.savefig(out_file, dpi=200, bbox_inches="tight")
+    plt.close()
+
+    logger.info(f"✓ Confusion matrix heatmap saved to: {out_file}")
+
+
+
 def visualize_dataset_in_2d_embedding(writer, encoding_list, dataset_name, save_path, task=1):
     """
     Visualization of 2-D latent embedding. Is saved to hard-disc as image file.

@@ -145,6 +145,13 @@ class ConfusionMeter:
             return conf / conf.sum(1).clip(min=1e-12)[:, None]
         else:
             return self.conf
+    
+    def value_counts(self):
+        """
+        Returns:
+            Raw confusion matrix with actual counts (not normalized).
+        """
+        return self.conf
 
 
 def accuracy(output, target, topk=(1,)):

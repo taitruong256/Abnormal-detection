@@ -7,7 +7,7 @@ from tqdm import tqdm
 from lib.Utility.metrics import AverageMeter
 from lib.Utility.metrics import ConfusionMeter
 from lib.Utility.metrics import accuracy
-from lib.Utility.visualization import visualize_confusion
+from lib.Utility.visualization import visualize_confusion, visualize_confusion_heatmap
 from lib.Utility.visualization import visualize_image_grid
 from lib.Utility.visualization import visualize_dataset_in_2d_embedding
 
@@ -136,8 +136,11 @@ def validate(Dataset, model, criterion, epoch, metrics_logger, device, save_path
 
     # At the end of training isolated, or at the end of every task visualize the confusion matrix
     if (epoch + 1) % args.epochs == 0 and epoch > 0:
-        # visualize the confusion matrix
+        # visualize the confusion matrix (original)
         visualize_confusion(None, epoch + 1, confusion.value(), Dataset.class_to_idx, save_path)
+        # visualize the confusion matrix (heatmap with actual counts - known classes only)
+        known_classes = Dataset.known if hasattr(Dataset, 'known') else None
+        visualize_confusion_heatmap(None, epoch + 1, confusion.value_counts(), Dataset.class_to_idx, save_path, known_classes)
     
     # Visualize 2D latent space if latent_dim is 2
     if hasattr(model, 'latent_dim') and model.latent_dim == 2:

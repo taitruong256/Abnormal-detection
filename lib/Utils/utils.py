@@ -23,11 +23,16 @@ def setup_logging(run_dir=None):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     log_file = os.path.join(logs_dir, f'logs_{timestamp}.txt')
     
+    # Disable matplotlib font_manager debug logs
+    logging.getLogger('matplotlib.font_manager').setLevel(logging.WARNING)
+    logging.getLogger('matplotlib').setLevel(logging.WARNING)
+    logging.getLogger('PIL').setLevel(logging.WARNING)
+    
     logger = logging.getLogger()
-    logger.setLevel(logging.DEBUG)
+    logger.setLevel(logging.INFO)  # Changed from DEBUG to INFO
     
     file_handler = logging.FileHandler(log_file)
-    file_handler.setLevel(logging.DEBUG)
+    file_handler.setLevel(logging.INFO)  # Changed from DEBUG to INFO
     
     console_handler = logging.StreamHandler()
     console_handler.setLevel(logging.INFO)
