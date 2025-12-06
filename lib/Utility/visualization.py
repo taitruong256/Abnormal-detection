@@ -965,7 +965,7 @@ def visualize_openset_2d_embedding(known_embeddings, unknown_embeddings_dict,
     ax1.set_title(f'Close-set: {known_dataset_name}\n(Known Classes Only)', fontsize=title_font_size)
     ax1.tick_params(labelsize=ticks_font_size)
     ax1.grid(True, alpha=0.3)
-    ax1.legend(fontsize=legend_font_size-6, loc='best', framealpha=0.9, ncol=2)
+    ax1.legend(fontsize=legend_font_size-6, loc='upper right', framealpha=0.9, ncol=2)
     
     # Plot 2: Open-set only (Unknown datasets)
     ax2 = plt.subplot(1, 3, 2)
@@ -986,7 +986,7 @@ def visualize_openset_2d_embedding(known_embeddings, unknown_embeddings_dict,
     ax2.set_title(f'Open-set: Unknown Datasets\n(Never Seen During Training)', fontsize=title_font_size)
     ax2.tick_params(labelsize=ticks_font_size)
     ax2.grid(True, alpha=0.3)
-    ax2.legend(fontsize=legend_font_size, loc='best', framealpha=0.9)
+    ax2.legend(fontsize=legend_font_size, loc='upper right', framealpha=0.9)
     
     # Plot 3: Combined (Close-set + Open-set)
     ax3 = plt.subplot(1, 3, 3)

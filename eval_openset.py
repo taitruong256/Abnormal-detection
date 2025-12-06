@@ -261,8 +261,37 @@ def main():
 
     # Weibull fitting
     # set tailsize according to command line parameters (according to percentage of dataset size)
+    # but ensure it doesn't exceed the minimum number of correctly classified samples per class
     tailsize = int(len(dataset.trainset) * args.openset_weibull_tailsize / num_classes)
-    logger.info("Fitting Weibull models with tailsize: " + str(tailsize))
+    
+    # Find minimum number of correctly classified samples across all classes
+    min_correct_samples = float('inf')
+    for i, zs in enumerate(dataset_eval_dict_train["zs_correct"]):
+        if isinstance(zs, list):
+            num_samples = len(zs)
+        elif isinstance(zs, torch.Tensor):
+            num_samples = zs.size(0)
+        else:
+            num_samples = 0
+        
+        if num_samples > 0:
+            min_correct_samples = min(min_correct_samples, num_samples)
+    
+    # Handle case where no class has correctly classified samples
+    if min_correct_samples == float('inf'):
+        logger.error("No correctly classified samples found in any class!")
+        logger.error(f"Training accuracy: {dataset_eval_dict_train['accuracy']:.2%}")
+        raise ValueError("Cannot fit Weibull models: no correctly classified samples. Please train the model better.")
+    
+    # Adjust tailsize to be at most 80% of minimum correct samples
+    tailsize = min(tailsize, int(min_correct_samples * 0.8))
+    tailsize = max(tailsize, 5)  # Ensure minimum tailsize of 5
+    
+    logger.info(f"Fitting Weibull models:")
+    logger.info(f"  Calculated tailsize: {int(len(dataset.trainset) * args.openset_weibull_tailsize / num_classes)}")
+    logger.info(f"  Min correct samples per class: {min_correct_samples}")
+    logger.info(f"  Adjusted tailsize: {tailsize}")
+    
     tailsizes = [tailsize] * num_classes
     weibull_models, valid_weibull = fit_weibull_models(distances_to_z_means_correct_train, tailsizes)
     assert valid_weibull, "Weibull fit is not valid"

@@ -20,7 +20,7 @@ import time
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Train and evaluate VAE model with open set recognition")
-    parser.add_argument('-b', '--batch-size', default=16, type=int, help='mini-batch size. Default: 16')
+    parser.add_argument('-b', '--batch-size', default=64, type=int, help='mini-batch size. Default: 16')
     parser.add_argument('--learning-rate', default=0.001, type=float, help='initial learning rate. Default: 0.001')
     parser.add_argument('--dataset', type=str, default='BloodMNIST', help="Dataset to use for training and evaluation.")
     parser.add_argument('--dataroot', type=str, default='./data', help='Data root directory. Default: ./data')
@@ -38,7 +38,7 @@ def parse_args():
     parser.add_argument('--wrn-embedding-size', type=int, default=48, help='number of output channels in the first wrn layer if widen factor is not being')
     parser.add_argument('--epochs', default=10, type=int, help='number of total epochs to run. Default: 10')
     parser.add_argument('--var-beta', default=0.1, type=float, help='weight term for KLD loss. Default: 0.1')
-    parser.add_argument('-pf', '--print-freq', default=100, type=float, help='print frequency. If int (>=1): log every N steps. If float (0-1): log at fraction of total steps per epoch. Default: 100')
+    parser.add_argument('-pf', '--print-freq', default=0.2, type=float, help='print frequency. If int (>=1): log every N steps. If float (0-1): log at fraction of total steps per epoch. Default: 100')
     parser.add_argument('--visualization-epoch', default=5, type=int, help='number of epochs after which generations/reconstructions are visualized/saved. Default: 20')
     parser.add_argument('--autoregression', default=False, type=bool, help='use autoregression. Default: False')
     parser.add_argument('--max-samples', default=None, type=int, help='Limit dataset to first N samples for quick testing (train=N, val=N/4). Default: None (use all data)')
