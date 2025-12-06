@@ -124,7 +124,7 @@ def parse_args():
                         help='Number of output channels of decoder when autoregression is used. Default: 60')
 
     parser.add_argument('--max-train-samples', default=450, type=int, help='maximum number of training samples. Default: None (use all samples)')
-    parser.add_argument('--max-test-samples', default=50, type=int, help='maximum number of test samples. Default: None (use 20%% of training samples)')
+    parser.add_argument('--max-test-samples', default=None, type=int, help='maximum number of test samples for openset datasets. Default: None (use all 300K TinyImageNet samples)')
     
     return parser.parse_args()
 

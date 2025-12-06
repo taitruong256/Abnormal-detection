@@ -362,8 +362,8 @@ class TinyImageNetOpenSet(Dataset):
         # Load image paths
         self.image_paths = self._load_image_paths()
         
-        # Limit to num_samples
-        if len(self.image_paths) > num_samples:
+        # Limit to num_samples (if specified)
+        if num_samples is not None and len(self.image_paths) > num_samples:
             indices = np.random.choice(len(self.image_paths), num_samples, replace=False)
             self.image_paths = [self.image_paths[i] for i in indices]
         
@@ -715,13 +715,13 @@ def TinyImageNet(is_gpu, args):
     """TinyImageNet: 200 classes, ~100K images for open-set evaluation"""
     from torch.utils.data import DataLoader
     
-    # Get num_samples from args (use max_test_samples or default)
-    num_samples = args.max_test_samples if hasattr(args, 'max_test_samples') and args.max_test_samples else 300000
+    # Get num_samples from args (None means use all images)
+    num_samples = args.max_test_samples if hasattr(args, 'max_test_samples') and args.max_test_samples is not None else None
     
     # Create dataset instance using the class defined above
     dataset = TinyImageNetOpenSet(
         root_dir=args.dataroot if hasattr(args, 'dataroot') else './data',
-        num_samples=num_samples,  # Changed from max_samples to num_samples
+        num_samples=num_samples,  # None means no limit
         transform=None,
         download=True,
         patch_size=args.patch_size if hasattr(args, 'patch_size') else 28
