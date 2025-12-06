@@ -415,6 +415,18 @@ def main():
                                              args.dataset + ' (trained)',
                                              args.var_samples, save_path)
 
+    # visualize 2D latent embedding for open set (if latent_dim=2)
+    if args.var_latent_dim == 2:
+        logger.info("Creating 2D open-set latent embedding visualization...")
+        # Collect unknown embeddings from all openset datasets
+        unknown_embeddings_dict = {name: eval_dict["zs"] 
+                                  for name, eval_dict in openset_dataset_eval_dicts.items()}
+        visualize_openset_2d_embedding(dataset_eval_dict_train["zs_correct"],
+                                      unknown_embeddings_dict,
+                                      args.dataset,
+                                      save_path,
+                                      num_classes)
+
     # visualize the outlier probabilities
     visualize_weibull_outlier_probabilities(outlier_probs_correct, openset_outlier_probs_dict,
                                             args.dataset + ' (trained)', save_path, tailsize)

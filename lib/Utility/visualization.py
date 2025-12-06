@@ -774,3 +774,167 @@ def plot_training_metrics(save_path):
     logger.info(f"{'='*80}\n")
     
     return saved_plots if saved_plots else None
+
+
+def visualize_openset_2d_embedding(known_embeddings, unknown_embeddings_dict, 
+                                   known_dataset_name, save_path, num_classes):
+    """
+    Visualize 2D latent embeddings for open set recognition evaluation.
+    Shows known classes (trained on) vs unknown classes (never seen).
+    
+    Parameters:
+        known_embeddings (list): List of tensors containing z values for each known class
+        unknown_embeddings_dict (dict): Dictionary with dataset_name -> list of z tensors
+        known_dataset_name (str): Name of the known/trained dataset
+        save_path (str): Path to save the visualization
+        num_classes (int): Number of known classes
+    """
+    import logging
+    logger = logging.getLogger()
+    
+    logger.info(f"Creating 2D open-set embedding visualization...")
+    
+    # Prepare known class data and check dimensionality
+    known_z_list = []
+    known_labels = []
+    latent_dim = None
+    
+    for class_idx, z_tensor in enumerate(known_embeddings):
+        if isinstance(z_tensor, torch.Tensor) and z_tensor.numel() > 0:
+            if latent_dim is None:
+                latent_dim = z_tensor.size(1)
+            known_z_list.append(z_tensor.cpu().numpy())
+            known_labels.extend([class_idx] * z_tensor.size(0))
+    
+    # Check if embeddings are 2D
+    if latent_dim != 2:
+        logger.warning(f"Skipping open-set 2D visualization - latent dimension is {latent_dim}, not 2D")
+        return
+    
+    if len(known_z_list) == 0:
+        logger.warning("No valid known embeddings to visualize")
+        return
+    
+    known_z = np.vstack(known_z_list)
+    known_labels = np.array(known_labels)
+    
+    # Prepare unknown data
+    all_unknown_z_list = []
+    all_unknown_labels = []
+    unknown_dataset_names = []
+    
+    for idx, (dataset_name, z_list) in enumerate(unknown_embeddings_dict.items()):
+        unknown_z_list = []
+        for z_tensor in z_list:
+            if isinstance(z_tensor, list):
+                for sub_tensor in z_tensor:
+                    if isinstance(sub_tensor, torch.Tensor) and sub_tensor.numel() > 0:
+                        unknown_z_list.append(sub_tensor.cpu().numpy())
+            elif isinstance(z_tensor, torch.Tensor) and z_tensor.numel() > 0:
+                unknown_z_list.append(z_tensor.cpu().numpy())
+        
+        if len(unknown_z_list) > 0:
+            unknown_z = np.vstack(unknown_z_list)
+            all_unknown_z_list.append(unknown_z)
+            all_unknown_labels.extend([idx] * len(unknown_z))
+            unknown_dataset_names.append(dataset_name)
+            logger.info(f"  Collected {len(unknown_z)} points from {dataset_name}")
+    
+    # Create figure with 3 subplots
+    fig = plt.figure(figsize=(60, 18))
+    
+    # Color palettes
+    known_colors = sns.color_palette("tab10", num_classes)
+    unknown_colors = sns.color_palette("Set1", len(unknown_dataset_names))
+    
+    # Plot 1: Close-set only (Known classes)
+    ax1 = plt.subplot(1, 3, 1)
+    for class_idx in range(num_classes):
+        mask = known_labels == class_idx
+        if np.sum(mask) > 0:
+            ax1.scatter(known_z[mask, 0], known_z[mask, 1], 
+                       c=[known_colors[class_idx]], 
+                       s=80, alpha=0.7, edgecolors='black', linewidth=0.5,
+                       label=f'Class {class_idx}')
+    
+    ax1.set_xlabel('z dimension 1', fontsize=axes_font_size)
+    ax1.set_ylabel('z dimension 2', fontsize=axes_font_size)
+    ax1.set_title(f'Close-set: {known_dataset_name}\n(Known Classes Only)', fontsize=title_font_size)
+    ax1.tick_params(labelsize=ticks_font_size)
+    ax1.grid(True, alpha=0.3)
+    ax1.legend(fontsize=legend_font_size-6, loc='best', framealpha=0.9, ncol=2)
+    
+    # Plot 2: Open-set only (Unknown datasets)
+    ax2 = plt.subplot(1, 3, 2)
+    if len(all_unknown_z_list) > 0:
+        all_unknown_z = np.vstack(all_unknown_z_list)
+        all_unknown_labels = np.array(all_unknown_labels)
+        
+        for idx, dataset_name in enumerate(unknown_dataset_names):
+            mask = all_unknown_labels == idx
+            if np.sum(mask) > 0:
+                ax2.scatter(all_unknown_z[mask, 0], all_unknown_z[mask, 1],
+                           c=[unknown_colors[idx]], 
+                           s=80, alpha=0.7, marker='x', linewidths=2.5,
+                           label=dataset_name)
+    
+    ax2.set_xlabel('z dimension 1', fontsize=axes_font_size)
+    ax2.set_ylabel('z dimension 2', fontsize=axes_font_size)
+    ax2.set_title(f'Open-set: Unknown Datasets\n(Never Seen During Training)', fontsize=title_font_size)
+    ax2.tick_params(labelsize=ticks_font_size)
+    ax2.grid(True, alpha=0.3)
+    ax2.legend(fontsize=legend_font_size, loc='best', framealpha=0.9)
+    
+    # Plot 3: Combined (Close-set + Open-set)
+    ax3 = plt.subplot(1, 3, 3)
+    
+    # Plot known classes with reduced opacity
+    for class_idx in range(num_classes):
+        mask = known_labels == class_idx
+        if np.sum(mask) > 0:
+            ax3.scatter(known_z[mask, 0], known_z[mask, 1], 
+                       c=[known_colors[class_idx]], 
+                       s=40, alpha=0.4, edgecolors='none')
+    
+    # Plot unknown datasets on top
+    if len(all_unknown_z_list) > 0:
+        for idx, dataset_name in enumerate(unknown_dataset_names):
+            mask = all_unknown_labels == idx
+            if np.sum(mask) > 0:
+                ax3.scatter(all_unknown_z[mask, 0], all_unknown_z[mask, 1],
+                           c=[unknown_colors[idx]], 
+                           s=120, alpha=0.8, marker='x', linewidths=3,
+                           label=f'{dataset_name} (Unknown)')
+    
+    # Add legend for known classes
+    from matplotlib.patches import Patch
+    legend_elements = [Patch(facecolor=known_colors[i], alpha=0.4, label=f'Known Class {i}') 
+                      for i in range(num_classes)]
+    
+    ax3.set_xlabel('z dimension 1', fontsize=axes_font_size)
+    ax3.set_ylabel('z dimension 2', fontsize=axes_font_size)
+    ax3.set_title(f'Combined: Close-set vs Open-set\n{known_dataset_name} (background) vs Unknown (foreground)', 
+                 fontsize=title_font_size)
+    ax3.tick_params(labelsize=ticks_font_size)
+    ax3.grid(True, alpha=0.3)
+    
+    # Dual legend
+    first_legend = ax3.legend(handles=legend_elements, fontsize=legend_font_size-8, 
+                             loc='upper left', framealpha=0.9, title='Known Classes', ncol=2)
+    ax3.add_artist(first_legend)
+    ax3.legend(fontsize=legend_font_size-6, loc='upper right', framealpha=0.9, title='Unknown Datasets')
+    
+    plt.tight_layout()
+    
+    # Save figure
+    save_file = os.path.join(save_path, f'{known_dataset_name}_openset_2d_embedding.png')
+    plt.savefig(save_file, dpi=150, bbox_inches='tight')
+    plt.close(fig)
+    
+    logger.info(f"✓ Open-set 2D embedding saved: {save_file}")
+    logger.info(f"  - Close-set (known): {len(known_z)} samples from {num_classes} classes")
+    if len(all_unknown_z_list) > 0:
+        logger.info(f"  - Open-set (unknown): {len(all_unknown_z)} samples from {len(unknown_dataset_names)} dataset(s)")
+    
+    return save_file
+
