@@ -776,6 +776,109 @@ def plot_training_metrics(save_path):
     return saved_plots if saved_plots else None
 
 
+def visualize_class_distribution(dataset, dataset_name, save_path, split='train'):
+    """
+    Visualize the class distribution of a dataset with a bar chart.
+    Shows the number of samples per class.
+    
+    Parameters:
+        dataset: Dataset object with class_to_idx attribute
+        dataset_name (str): Name of the dataset
+        save_path (str): Path to save the visualization
+        split (str): Dataset split ('train', 'val', 'test', or 'all')
+    """
+    import logging
+    logger = logging.getLogger()
+    
+    logger.info(f"Creating class distribution visualization for {dataset_name} ({split} set)...")
+    
+    # Get the appropriate data loader(s)
+    loaders = []
+    if split == 'all':
+        # Combine all splits
+        if hasattr(dataset, 'train_loader'):
+            loaders.append(dataset.train_loader)
+        if hasattr(dataset, 'val_loader'):
+            loaders.append(dataset.val_loader)
+        if hasattr(dataset, 'test_loader'):
+            loaders.append(dataset.test_loader)
+    else:
+        if split == 'train':
+            loader = dataset.train_loader if hasattr(dataset, 'train_loader') else None
+        elif split == 'val':
+            loader = dataset.val_loader if hasattr(dataset, 'val_loader') else None
+        else:
+            loader = dataset.test_loader if hasattr(dataset, 'test_loader') else None
+        
+        if loader is not None:
+            loaders.append(loader)
+    
+    if not loaders:
+        logger.warning(f"No {split} loader found for {dataset_name}")
+        return
+    
+    # Count samples per class
+    class_counts = {}
+    total_samples = 0
+    
+    for loader in loaders:
+        for _, labels in loader:
+            for label in labels:
+                label_item = label.item()
+                class_counts[label_item] = class_counts.get(label_item, 0) + 1
+                total_samples += 1
+    
+    # Get class names
+    if hasattr(dataset, 'class_to_idx') and dataset.class_to_idx:
+        idx_to_class = {v: k for k, v in dataset.class_to_idx.items()}
+        class_names = [idx_to_class.get(i, f'Class {i}') for i in sorted(class_counts.keys())]
+    else:
+        class_names = [f'Class {i}' for i in sorted(class_counts.keys())]
+    
+    counts = [class_counts[i] for i in sorted(class_counts.keys())]
+    
+    # Create bar chart
+    fig, ax = plt.subplots(figsize=(20, 12))
+    
+    x_pos = np.arange(len(class_names))
+    bars = ax.bar(x_pos, counts, color=sns.color_palette("Set2", len(class_names)), 
+                  edgecolor='black', linewidth=1.5, alpha=0.8)
+    
+    # Add value labels on top of bars
+    for i, (bar, count) in enumerate(zip(bars, counts)):
+        height = bar.get_height()
+        ax.text(bar.get_x() + bar.get_width()/2., height,
+                f'{count}\n({count/total_samples*100:.1f}%)',
+                ha='center', va='bottom', fontsize=legend_font_size-6, fontweight='bold')
+    
+    ax.set_xlabel('Class', fontsize=axes_font_size)
+    ax.set_ylabel('Number of Samples', fontsize=axes_font_size)
+    
+    title_text = f'{dataset_name} - Class Distribution ({split.capitalize()} Set)\nTotal: {total_samples} samples'
+    if split == 'all':
+        title_text = f'{dataset_name} - Class Distribution (All Data)\nTotal: {total_samples} samples'
+    ax.set_title(title_text, fontsize=title_font_size)
+    
+    ax.set_xticks(x_pos)
+    ax.set_xticklabels(class_names, rotation=45, ha='right', fontsize=ticks_font_size-8)
+    ax.tick_params(axis='y', labelsize=ticks_font_size)
+    ax.grid(axis='y', alpha=0.3)
+    
+    plt.tight_layout()
+    
+    # Save figure
+    save_file = os.path.join(save_path, f'{dataset_name}_class_distribution_{split}.png')
+    plt.savefig(save_file, dpi=150, bbox_inches='tight')
+    plt.close(fig)
+    
+    logger.info(f"✓ Class distribution saved: {save_file}")
+    logger.info(f"  Total samples: {total_samples}")
+    logger.info(f"  Number of classes: {len(class_counts)}")
+    logger.info(f"  Samples per class: min={min(counts)}, max={max(counts)}, mean={np.mean(counts):.1f}")
+    
+    return save_file
+
+
 def visualize_openset_2d_embedding(known_embeddings, unknown_embeddings_dict, 
                                    known_dataset_name, save_path, num_classes):
     """

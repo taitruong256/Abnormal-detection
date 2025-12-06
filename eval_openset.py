@@ -75,7 +75,7 @@ def parse_args():
     )
     
     # Dataset and loading
-    parser.add_argument('--dataset', default='MNIST', help='Name of dataset. Default: MNIST')
+    parser.add_argument('--dataset', default='BloodMNIST', help='Name of dataset. Default: MNIST')
     parser.add_argument('-j', '--workers', default=4, type=int, help='Number of data loading workers. Default: 4')
     parser.add_argument('-p', '--patch-size', default=28, type=int, help='Patch size for crops. Default: 28')
     parser.add_argument('--gray-scale', default=False, type=bool, 
@@ -223,6 +223,13 @@ def main():
 
     # set the save path to the directory from which the model has been loaded
     save_path = os.path.dirname(args.resume)
+
+    # Visualize class distribution for the dataset
+    logger.info("="*80)
+    visualize_class_distribution(dataset, args.dataset, save_path, split='all')
+    visualize_class_distribution(dataset, args.dataset, save_path, split='train')
+    visualize_class_distribution(dataset, args.dataset, save_path, split='val')
+    logger.info("="*80)
 
     # start of the model evaluation on the training dataset and fitting
     logger.info("Evaluating original train dataset: " + args.dataset + ". This may take a while...")

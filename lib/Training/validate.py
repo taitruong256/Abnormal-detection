@@ -50,6 +50,13 @@ def validate(Dataset, model, criterion, epoch, metrics_logger, device, save_path
 
     # switch to evaluate mode
     model.eval()
+    
+    # Calculate print frequency based on args
+    total_steps = len(Dataset.val_loader)
+    if args.print_freq < 1.0:  # Float: fraction of total steps
+        print_freq = max(1, int(args.print_freq * total_steps))
+    else:  # Int: absolute number of steps
+        print_freq = int(args.print_freq)
 
     end = time.time()
 
@@ -113,7 +120,7 @@ def validate(Dataset, model, criterion, epoch, metrics_logger, device, save_path
                 visualize_image_grid(gen, None, epoch + 1, 'generation_snapshot', save_path)
 
             # Print progress
-            if i % args.print_freq == 0:
+            if i % print_freq == 0:
                 logger.info('Validate: [{0}][{1}/{2}]\t' 
                       'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t' 
                       'Loss {loss.val:.4f} ({loss.avg:.4f})\t'

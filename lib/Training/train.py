@@ -38,6 +38,13 @@ def train(Dataset, model, criterion, epoch, optimizer, metrics_logger, device, a
 
     # switch to train mode
     model.train()
+    
+    # Calculate print frequency based on args
+    total_steps = len(Dataset.train_loader)
+    if args.print_freq < 1.0:  # Float: fraction of total steps
+        print_freq = max(1, int(args.print_freq * total_steps))
+    else:  # Int: absolute number of steps
+        print_freq = int(args.print_freq)
 
     end = time.time()
 
@@ -86,7 +93,7 @@ def train(Dataset, model, criterion, epoch, optimizer, metrics_logger, device, a
         end = time.time()
 
         # print progress
-        if i % args.print_freq == 0:
+        if i % print_freq == 0:
             logger.info('Training: [{0}][{1}/{2}]\t' 
                     'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
                     'Data {data_time.val:.3f} ({data_time.avg:.3f})\t'
