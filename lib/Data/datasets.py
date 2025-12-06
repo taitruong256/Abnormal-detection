@@ -14,7 +14,15 @@ import numpy as np
 from torch.utils.data import DataLoader, Dataset, Subset
 from torchvision import transforms
 import medmnist
-from medmnist import INFO, PathMNIST, DermaMNIST, OCTMNIST, TissueMNIST, BloodMNIST
+from medmnist import INFO
+# Import MedMNIST dataset classes with aliases to avoid naming conflicts
+from medmnist import (
+    PathMNIST as MedMNIST_PathMNIST,
+    DermaMNIST as MedMNIST_DermaMNIST, 
+    OCTMNIST as MedMNIST_OCTMNIST,
+    TissueMNIST as MedMNIST_TissueMNIST,
+    BloodMNIST as MedMNIST_BloodMNIST
+)
 from PIL import Image
 
 # Add configs to path
@@ -231,11 +239,11 @@ class MedMNIST:
         
         # Get the dataset class
         dataset_mapping = {
-            'pathmnist': PathMNIST,
-            'dermamnist': DermaMNIST,
-            'octmnist': OCTMNIST,
-            'tissuemnist': TissueMNIST,
-            'bloodmnist': BloodMNIST,
+            'pathmnist': MedMNIST_PathMNIST,
+            'dermamnist': MedMNIST_DermaMNIST,
+            'octmnist': MedMNIST_OCTMNIST,
+            'tissuemnist': MedMNIST_TissueMNIST,
+            'bloodmnist': MedMNIST_BloodMNIST,
         }
         
         if self.dataset_name not in dataset_mapping:
@@ -538,4 +546,199 @@ def get_dataset(is_gpu, args):
         return dataset
     else:
         raise ValueError(f"Unknown dataset: {dataset_name}. Supported: {medmnist_datasets}")
+
+
+# ============================================================================
+# Dataset wrapper functions for compatibility with eval_openset.py
+# ============================================================================
+# These wrapper functions allow using dataset names directly like:
+# getattr(datasets, 'BloodMNIST')(is_gpu, args) 
+# This matches the OpenVAE API where each dataset is a separate class/function
+
+def BloodMNIST(is_gpu, args):
+    """BloodMNIST: 8 classes, 17,092 color images (28×28)"""
+    # Convert args to known classes
+    if hasattr(args, 'known'):
+        known = args.known
+    else:
+        # Default: use all 8 classes
+        known = list(range(8))
+    
+    dataset = MedMNIST(
+        known=known,
+        dataroot=args.dataroot if hasattr(args, 'dataroot') else './data',
+        use_gpu=is_gpu,
+        num_workers=args.workers if hasattr(args, 'workers') else 4,
+        batch_size=args.batch_size if hasattr(args, 'batch_size') else 128,
+        patch_size=args.patch_size if hasattr(args, 'patch_size') else 28,
+        gray_scale=args.gray_scale if hasattr(args, 'gray_scale') else False,
+        dataset_name='bloodmnist'
+    )
+    return dataset
+
+def OCTMNIST(is_gpu, args):
+    """OCTMNIST: 4 classes, 109,309 grayscale images (28×28)"""
+    if hasattr(args, 'known'):
+        known = args.known
+    else:
+        known = list(range(4))
+    
+    dataset = MedMNIST(
+        known=known,
+        dataroot=args.dataroot if hasattr(args, 'dataroot') else './data',
+        use_gpu=is_gpu,
+        num_workers=args.workers if hasattr(args, 'workers') else 4,
+        batch_size=args.batch_size if hasattr(args, 'batch_size') else 128,
+        patch_size=args.patch_size if hasattr(args, 'patch_size') else 28,
+        gray_scale=args.gray_scale if hasattr(args, 'gray_scale') else False,
+        dataset_name='octmnist'
+    )
+    return dataset
+
+def PathMNIST(is_gpu, args):
+    """PathMNIST: 9 classes, 107,180 color images (28×28)"""
+    if hasattr(args, 'known'):
+        known = args.known
+    else:
+        known = list(range(9))
+    
+    dataset = MedMNIST(
+        known=known,
+        dataroot=args.dataroot if hasattr(args, 'dataroot') else './data',
+        use_gpu=is_gpu,
+        num_workers=args.workers if hasattr(args, 'workers') else 4,
+        batch_size=args.batch_size if hasattr(args, 'batch_size') else 128,
+        patch_size=args.patch_size if hasattr(args, 'patch_size') else 28,
+        gray_scale=args.gray_scale if hasattr(args, 'gray_scale') else False,
+        dataset_name='pathmnist'
+    )
+    return dataset
+
+def DermaMNIST(is_gpu, args):
+    """DermaMNIST: 7 classes, 10,015 color images (28×28)"""
+    if hasattr(args, 'known'):
+        known = args.known
+    else:
+        known = list(range(7))
+    
+    dataset = MedMNIST(
+        known=known,
+        dataroot=args.dataroot if hasattr(args, 'dataroot') else './data',
+        use_gpu=is_gpu,
+        num_workers=args.workers if hasattr(args, 'workers') else 4,
+        batch_size=args.batch_size if hasattr(args, 'batch_size') else 128,
+        patch_size=args.patch_size if hasattr(args, 'patch_size') else 28,
+        gray_scale=args.gray_scale if hasattr(args, 'gray_scale') else False,
+        dataset_name='dermamnist'
+    )
+    return dataset
+
+def TissueMNIST(is_gpu, args):
+    """TissueMNIST: 8 classes, 236,386 grayscale images (28×28)"""
+    if hasattr(args, 'known'):
+        known = args.known
+    else:
+        known = list(range(8))
+    
+    dataset = MedMNIST(
+        known=known,
+        dataroot=args.dataroot if hasattr(args, 'dataroot') else './data',
+        use_gpu=is_gpu,
+        num_workers=args.workers if hasattr(args, 'workers') else 4,
+        batch_size=args.batch_size if hasattr(args, 'batch_size') else 128,
+        patch_size=args.patch_size if hasattr(args, 'patch_size') else 28,
+        gray_scale=args.gray_scale if hasattr(args, 'gray_scale') else False,
+        dataset_name='tissuemnist'
+    )
+    return dataset
+
+def OrganAMNIST(is_gpu, args):
+    """OrganAMNIST: 11 classes, axial view"""
+    if hasattr(args, 'known'):
+        known = args.known
+    else:
+        known = list(range(11))
+    
+    dataset = MedMNIST(
+        known=known,
+        dataroot=args.dataroot if hasattr(args, 'dataroot') else './data',
+        use_gpu=is_gpu,
+        num_workers=args.workers if hasattr(args, 'workers') else 4,
+        batch_size=args.batch_size if hasattr(args, 'batch_size') else 128,
+        patch_size=args.patch_size if hasattr(args, 'patch_size') else 28,
+        gray_scale=args.gray_scale if hasattr(args, 'gray_scale') else False,
+        dataset_name='organamnist'
+    )
+    return dataset
+
+def OrganCMNIST(is_gpu, args):
+    """OrganCMNIST: 11 classes, coronal view"""
+    if hasattr(args, 'known'):
+        known = args.known
+    else:
+        known = list(range(11))
+    
+    dataset = MedMNIST(
+        known=known,
+        dataroot=args.dataroot if hasattr(args, 'dataroot') else './data',
+        use_gpu=is_gpu,
+        num_workers=args.workers if hasattr(args, 'workers') else 4,
+        batch_size=args.batch_size if hasattr(args, 'batch_size') else 128,
+        patch_size=args.patch_size if hasattr(args, 'patch_size') else 28,
+        gray_scale=args.gray_scale if hasattr(args, 'gray_scale') else False,
+        dataset_name='organcmnist'
+    )
+    return dataset
+
+def OrganSMNIST(is_gpu, args):
+    """OrganSMNIST: 11 classes, sagittal view"""
+    if hasattr(args, 'known'):
+        known = args.known
+    else:
+        known = list(range(11))
+    
+    dataset = MedMNIST(
+        known=known,
+        dataroot=args.dataroot if hasattr(args, 'dataroot') else './data',
+        use_gpu=is_gpu,
+        num_workers=args.workers if hasattr(args, 'workers') else 4,
+        batch_size=args.batch_size if hasattr(args, 'batch_size') else 128,
+        patch_size=args.patch_size if hasattr(args, 'patch_size') else 28,
+        gray_scale=args.gray_scale if hasattr(args, 'gray_scale') else False,
+        dataset_name='organsmnist'
+    )
+    return dataset
+
+
+# TinyImageNet wrapper for open-set evaluation
+def TinyImageNet(is_gpu, args):
+    """TinyImageNet: 200 classes, ~100K images for open-set evaluation"""
+    from torch.utils.data import DataLoader
+    
+    # Get num_samples from args (use max_test_samples or default)
+    num_samples = args.max_test_samples if hasattr(args, 'max_test_samples') and args.max_test_samples else 300000
+    
+    # Create dataset instance using the class defined above
+    dataset = TinyImageNetOpenSet(
+        root_dir=args.dataroot if hasattr(args, 'dataroot') else './data',
+        num_samples=num_samples,  # Changed from max_samples to num_samples
+        transform=None,
+        download=True,
+        patch_size=args.patch_size if hasattr(args, 'patch_size') else 28
+    )
+    
+    # Create DataLoader
+    dataset.val_loader = DataLoader(
+        dataset,
+        batch_size=args.batch_size if hasattr(args, 'batch_size') else 128,
+        shuffle=False,
+        num_workers=args.workers if hasattr(args, 'workers') else 4,
+        pin_memory=is_gpu
+    )
+    
+    # Add required attributes for compatibility with eval_openset.py
+    dataset.num_classes = 0  # Unknown/open-set dataset
+    dataset.class_to_idx = {}
+    
+    return dataset
 

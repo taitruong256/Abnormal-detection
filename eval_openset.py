@@ -42,13 +42,13 @@ def setup_logging(save_path):
     log_file = os.path.join(save_path, f'eval_openset_{timestamp}.log')
     
     logger = logging.getLogger()
-    logger.setLevel(logging.DEBUG)
+    logger.setLevel(logging.INFO)  # Changed from DEBUG to INFO to reduce log verbosity
     
     # Clear existing handlers
     logger.handlers.clear()
     
     file_handler = logging.FileHandler(log_file)
-    file_handler.setLevel(logging.DEBUG)
+    file_handler.setLevel(logging.INFO)  # Changed from DEBUG to INFO
     
     console_handler = logging.StreamHandler()
     console_handler.setLevel(logging.INFO)
@@ -158,9 +158,11 @@ def main():
     # Split a part of the non-used dataset to use as validation set for determining open set (e.g entropy)
     # rejection thresholds
     split_perc = 0.5
-    split_sets = torch.utils.data.random_split(dataset.valset,
-                                               [int((1 - split_perc) * len(dataset.valset)),
-                                                int(split_perc * len(dataset.valset))])
+    val_len = len(dataset.valset)
+    split1_len = int((1 - split_perc) * val_len)
+    split2_len = val_len - split1_len  # Ensure total equals val_len
+    
+    split_sets = torch.utils.data.random_split(dataset.valset, [split1_len, split2_len])
 
     # overwrite old set and create new split set to determine thresholds/priors
     dataset.valset = split_sets[0]
@@ -233,8 +235,18 @@ def main():
     mean_zs = get_means(dataset_eval_dict_train["zs_correct"])
 
     # visualize the mean z vectors
-    mean_zs_tensor = torch.stack(mean_zs, dim=0)
-    visualize_means(mean_zs_tensor, dataset.class_to_idx, args.dataset, save_path, "z")
+    # Filter out empty lists and convert to tensor
+    mean_zs_tensors = [m for m in mean_zs if isinstance(m, torch.Tensor) and m.numel() > 0]
+    if len(mean_zs_tensors) > 0:
+        mean_zs_tensor = torch.stack(mean_zs_tensors, dim=0)
+        
+        # Create class labels only for classes that have valid means
+        valid_class_indices = [i for i, m in enumerate(mean_zs) if isinstance(m, torch.Tensor) and m.numel() > 0]
+        valid_class_to_idx = {list(dataset.class_to_idx.keys())[i]: i for i in valid_class_indices if i < len(dataset.class_to_idx)}
+        
+        visualize_means(mean_zs_tensor, valid_class_to_idx, args.dataset, save_path, "z")
+    else:
+        logger.warning("No valid mean z vectors to visualize")
 
     # calculate each correctly classified example's distance to the mean z
     distances_to_z_means_correct_train = calc_distances_to_means(mean_zs, dataset_eval_dict_train["zs_correct"],
