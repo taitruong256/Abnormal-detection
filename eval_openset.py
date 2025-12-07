@@ -467,6 +467,14 @@ def main():
     visualize_weibull_outlier_probabilities(outlier_probs_correct, openset_outlier_probs_dict,
                                             args.dataset + ' (trained)', save_path, tailsize)
 
+    # Visualize Open-Set Recognition confusion matrices
+    logger.info("="*80)
+    visualize_openset_confusion_matrix(dataset_eval_dict, openset_dataset_eval_dicts,
+                                      outlier_probs_correct, openset_outlier_probs_dict,
+                                      EVT_prior, entropy_threshold,
+                                      args.dataset, num_classes, save_path)
+    logger.info("="*80)
+
     # histograms
     visualize_classification_scores(dataset_eval_dict["out_mus_correct"], openset_dataset_eval_dicts, 'out_mus',
                                     args.dataset + ' (trained)', save_path)

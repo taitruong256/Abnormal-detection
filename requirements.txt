@@ -16,3 +16,4 @@ libmr
 kagglehub
 seaborn
 medmnist
+timm

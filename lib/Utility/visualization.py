@@ -1041,3 +1041,128 @@ def visualize_openset_2d_embedding(known_embeddings, unknown_embeddings_dict,
     
     return save_file
 
+
+def visualize_openset_confusion_matrix(known_eval_dict, openset_eval_dicts, 
+                                      outlier_probs_correct, openset_outlier_probs_dict,
+                                      evt_threshold, entropy_threshold,
+                                      known_dataset_name, num_classes, save_path):
+    """
+    Visualize confusion matrix for Open Set Recognition.
+    Shows:
+    - Known classes classification (diagonal = correct)
+    - Unknown rejection (last column/row)
+    
+    Parameters:
+        known_eval_dict (dict): Evaluation results for known dataset
+        openset_eval_dicts (dict): Dict of evaluation results for openset datasets
+        outlier_probs_correct (list): Weibull outlier probabilities for known dataset
+        openset_outlier_probs_dict (dict): Dict of Weibull outlier probs for openset datasets
+        evt_threshold (float): Threshold for EVT method
+        entropy_threshold (float): Threshold for Entropy method
+        known_dataset_name (str): Name of known dataset
+        num_classes (int): Number of known classes
+        save_path (str): Path to save visualization
+    """
+    import logging
+    logger = logging.getLogger()
+    
+    logger.info(f"Creating Open-Set Recognition confusion matrices...")
+    
+    # Create confusion matrix for EVT method
+    # (Entropy method would require tracking predicted class for each sample, 
+    # which is not readily available in current data structure)
+    
+    matrix_size = num_classes + 1
+    confusion_matrix = np.zeros((matrix_size, matrix_size))
+    
+    # Process known dataset - EVT method
+    for class_idx in range(num_classes):
+        # Correctly classified samples
+        outlier_probs = outlier_probs_correct[class_idx]
+        for i in range(len(outlier_probs)):
+            if outlier_probs[i] > evt_threshold:
+                # Rejected as unknown (False Positive)
+                confusion_matrix[class_idx, num_classes] += 1
+            else:
+                # Accepted as known (True Positive for closed-set)
+                confusion_matrix[class_idx, class_idx] += 1
+    
+    # Process openset datasets - EVT method
+    for openset_name, openset_eval_dict in openset_eval_dicts.items():
+        for class_idx in range(num_classes):
+            outlier_probs = openset_outlier_probs_dict[openset_name][class_idx]
+            for i in range(len(outlier_probs)):
+                if outlier_probs[i] > evt_threshold:
+                    # Correctly rejected as unknown (True Positive for open-set)
+                    confusion_matrix[num_classes, num_classes] += 1
+                else:
+                    # Misclassified as known class (False Negative for open-set)
+                    confusion_matrix[num_classes, class_idx] += 1
+    
+    # Calculate percentages for better visualization
+    row_sums = confusion_matrix.sum(axis=1, keepdims=True)
+    row_sums[row_sums == 0] = 1  # Avoid division by zero
+    confusion_matrix_pct = (confusion_matrix / row_sums) * 100
+    
+    # Create figure
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(40, 18))
+    
+    # Class names
+    class_names = [f'Class {i}' for i in range(num_classes)] + ['Unknown']
+    
+    # Plot 1: Raw counts
+    sns.heatmap(confusion_matrix, annot=True, fmt='.0f', cmap='Blues', 
+                xticklabels=class_names, yticklabels=class_names,
+                ax=ax1, cbar_kws={'label': 'Count'}, 
+                linewidths=1, linecolor='gray')
+    
+    ax1.set_xlabel('Predicted Label', fontsize=axes_font_size)
+    ax1.set_ylabel('True Label', fontsize=axes_font_size)
+    ax1.set_title(f'OSR Confusion Matrix - EVT Method\n{known_dataset_name} vs Unknown\n(Raw Counts)', 
+                 fontsize=title_font_size)
+    ax1.tick_params(labelsize=ticks_font_size-8, rotation=45)
+    
+    # Plot 2: Percentages
+    sns.heatmap(confusion_matrix_pct, annot=True, fmt='.1f', cmap='RdYlGn', 
+                xticklabels=class_names, yticklabels=class_names,
+                ax=ax2, cbar_kws={'label': 'Percentage (%)'}, 
+                linewidths=1, linecolor='gray', vmin=0, vmax=100)
+    
+    ax2.set_xlabel('Predicted Label', fontsize=axes_font_size)
+    ax2.set_ylabel('True Label', fontsize=axes_font_size)
+    ax2.set_title(f'OSR Confusion Matrix - EVT Method\n{known_dataset_name} vs Unknown\n(Percentages)', 
+                 fontsize=title_font_size)
+    ax2.tick_params(labelsize=ticks_font_size-8, rotation=45)
+    
+    # Add statistics
+    known_correct = np.diag(confusion_matrix[:num_classes, :num_classes]).sum()
+    known_total = confusion_matrix[:num_classes, :].sum()
+    unknown_rejected = confusion_matrix[num_classes, num_classes]
+    unknown_total = confusion_matrix[num_classes, :].sum()
+    
+    known_acc = (known_correct / known_total * 100) if known_total > 0 else 0
+    unknown_recall = (unknown_rejected / unknown_total * 100) if unknown_total > 0 else 0
+    fpr = ((confusion_matrix[:num_classes, num_classes].sum()) / known_total * 100) if known_total > 0 else 0
+    
+    stats_text = (f"Known Accuracy: {known_acc:.2f}%\n"
+                 f"Unknown Detection (TPR): {unknown_recall:.2f}%\n"
+                 f"False Positive Rate: {fpr:.2f}%\n"
+                 f"Known samples: {int(known_total)}\n"
+                 f"Unknown samples: {int(unknown_total)}")
+    
+    fig.text(0.5, 0.02, stats_text, ha='center', fontsize=legend_font_size, 
+            bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+    
+    plt.tight_layout(rect=[0, 0.05, 1, 1])
+    
+    # Save figure
+    save_file = os.path.join(save_path, f'{known_dataset_name}_OSR_confusion_EVT.png')
+    plt.savefig(save_file, dpi=150, bbox_inches='tight')
+    plt.close(fig)
+    
+    logger.info(f"✓ OSR confusion matrix (EVT) saved: {save_file}")
+    logger.info(f"  Known accuracy: {known_acc:.2f}%")
+    logger.info(f"  Unknown detection (TPR): {unknown_recall:.2f}%")
+    logger.info(f"  False Positive Rate: {fpr:.2f}%")
+
+

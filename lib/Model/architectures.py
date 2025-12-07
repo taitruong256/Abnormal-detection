@@ -1,6 +1,9 @@
 from collections import OrderedDict
 import torch
 import torch.nn as nn
+import timm
+
+
 
 
 def grow_classifier(device, classifier, class_increment, weight_initializer):
@@ -401,3 +404,198 @@ class WRN(nn.Module):
             output_samples[i] = self.decode(z)
             classification_samples[i] = self.classifier(z)
         return classification_samples, output_samples, z_mean, z_std
+
+
+class TimmEncoder(nn.Module):
+    """
+    Base class for using timm models as encoder (architecture only, no pretrained weights)
+    Uses WRN-style decoder for reconstruction
+    """
+    def __init__(self, device, num_classes, num_colors, args, model_name='resnet18'):
+        super(TimmEncoder, self).__init__()
+
+        self.batch_norm = args.batch_norm
+        self.patch_size = args.patch_size
+        self.batch_size = args.batch_size
+        self.num_colors = num_colors
+        self.num_classes = num_classes
+        self.device = device
+        self.out_channels = args.out_channels
+        self.model_name = model_name
+
+        self.seen_tasks = []
+        self.num_samples = args.var_samples
+        self.latent_dim = args.var_latent_dim
+
+        # HRNet and some models require input size divisible by 32
+        # Pad 28x28 to 32x32 for compatibility
+        self.needs_padding = 'hrnet' in model_name.lower() or 'swin' in model_name.lower()
+        if self.needs_padding:
+            self.padded_size = 32
+            self.pad_left = (self.padded_size - self.patch_size) // 2
+            self.pad_right = self.padded_size - self.patch_size - self.pad_left
+            self.pad_top = self.pad_left
+            self.pad_bottom = self.pad_right
+        else:
+            self.padded_size = self.patch_size
+
+        # Create encoder using timm (NO pretrained weights)
+        self.backbone = timm.create_model(
+            model_name,
+            pretrained=False,
+            features_only=True,
+            in_chans=num_colors
+        )
+        
+        # Get encoder output dimensions (use eval mode to avoid BatchNorm error with batch_size=1)
+        self.backbone.eval()
+        with torch.no_grad():
+            dummy_input = torch.randn(1, num_colors, self.padded_size, self.padded_size)
+            features = self.backbone(dummy_input)
+            self.enc_channels = features[-1].shape[1]
+            self.enc_spatial_dim_x = features[-1].shape[2]
+            self.enc_spatial_dim_y = features[-1].shape[3]
+        self.backbone.train()
+        
+        # Variational bottleneck
+        self.latent_mu = nn.Linear(
+            self.enc_spatial_dim_x * self.enc_spatial_dim_y * self.enc_channels,
+            self.latent_dim, bias=False
+        )
+        self.latent_std = nn.Linear(
+            self.enc_spatial_dim_x * self.enc_spatial_dim_y * self.enc_channels,
+            self.latent_dim, bias=False
+        )
+
+        self.classifier = nn.Sequential(nn.Linear(self.latent_dim, num_classes, bias=False))
+
+        # Map latent back to feature space
+        self.latent_decoder = nn.Linear(
+            self.latent_dim,
+            self.enc_spatial_dim_x * self.enc_spatial_dim_y * self.enc_channels,
+            bias=False
+        )
+
+        # Build WRN-style decoder
+        self._build_wrn_style_decoder()
+
+    def _build_wrn_style_decoder(self):
+        """Build decoder similar to WRN for proper reconstruction"""
+        # Calculate upsampling needed
+        current_spatial = self.enc_spatial_dim_x
+        target_spatial = self.patch_size
+        
+        # Determine number of upsample steps
+        num_upsamples = 0
+        temp_size = current_spatial
+        while temp_size < target_spatial:
+            temp_size *= 2
+            num_upsamples += 1
+        
+        # Build decoder with WRN blocks
+        if num_upsamples == 0:
+            # No upsampling needed
+            self.decoder = nn.Sequential(OrderedDict([
+                ('decoder_conv1', nn.Conv2d(self.enc_channels, self.out_channels, 
+                                           kernel_size=3, stride=1, padding=1, bias=False))
+            ]))
+        elif num_upsamples == 1:
+            # Single upsample (e.g., 14x14 -> 28x28)
+            mid_channels = max(self.enc_channels // 2, 32)
+            self.decoder = nn.Sequential(OrderedDict([
+                ('decoder_block1', WRNNetworkBlock(1, self.enc_channels, mid_channels,
+                                                   WRNBasicBlock, batchnorm=self.batch_norm, stride=1)),
+                ('decoder_bn1', nn.BatchNorm2d(mid_channels, eps=self.batch_norm)),
+                ('decoder_act1', nn.ReLU(inplace=True)),
+                ('decoder_upsample1', nn.Upsample(scale_factor=2, mode='nearest')),
+                ('decoder_conv1', nn.Conv2d(mid_channels, self.out_channels, 
+                                           kernel_size=3, stride=1, padding=1, bias=False))
+            ]))
+        elif num_upsamples == 2:
+            # Two upsamples (e.g., 7x7 -> 14x14 -> 28x28)
+            mid_channels1 = max(self.enc_channels // 2, 64)
+            mid_channels2 = max(mid_channels1 // 2, 32)
+            self.decoder = nn.Sequential(OrderedDict([
+                ('decoder_block1', WRNNetworkBlock(1, self.enc_channels, mid_channels1,
+                                                   WRNBasicBlock, batchnorm=self.batch_norm, stride=1)),
+                ('decoder_upsample1', nn.Upsample(scale_factor=2, mode='nearest')),
+                ('decoder_block2', WRNNetworkBlock(1, mid_channels1, mid_channels2,
+                                                   WRNBasicBlock, batchnorm=self.batch_norm, stride=1)),
+                ('decoder_upsample2', nn.Upsample(scale_factor=2, mode='nearest')),
+                ('decoder_bn1', nn.BatchNorm2d(mid_channels2, eps=self.batch_norm)),
+                ('decoder_act1', nn.ReLU(inplace=True)),
+                ('decoder_conv1', nn.Conv2d(mid_channels2, self.out_channels, 
+                                           kernel_size=3, stride=1, padding=1, bias=False))
+            ]))
+        else:
+            # Three or more upsamples
+            channels = [self.enc_channels]
+            for i in range(num_upsamples):
+                channels.append(max(channels[-1] // 2, 16))
+            
+            layers = []
+            for i in range(num_upsamples):
+                layers.extend([
+                    ('decoder_block' + str(i+1), WRNNetworkBlock(1, channels[i], channels[i+1],
+                                                                 WRNBasicBlock, batchnorm=self.batch_norm, stride=1)),
+                    ('decoder_upsample' + str(i+1), nn.Upsample(scale_factor=2, mode='nearest'))
+                ])
+            
+            layers.extend([
+                ('decoder_bn1', nn.BatchNorm2d(channels[-1], eps=self.batch_norm)),
+                ('decoder_act1', nn.ReLU(inplace=True)),
+                ('decoder_conv1', nn.Conv2d(channels[-1], self.out_channels, 
+                                           kernel_size=3, stride=1, padding=1, bias=False))
+            ])
+            
+            self.decoder = nn.Sequential(OrderedDict(layers))
+
+    def encode(self, x):
+        # Apply padding if needed (for HRNet, Swin, etc.)
+        if self.needs_padding:
+            x = nn.functional.pad(x, (self.pad_left, self.pad_right, self.pad_top, self.pad_bottom), mode='constant', value=0)
+        
+        features = self.backbone(x)
+        x = features[-1]
+        x = x.view(x.size(0), -1)
+        z_mean = self.latent_mu(x)
+        z_std = self.latent_std(x)
+        return z_mean, z_std
+
+    def reparameterize(self, mu, std):
+        eps = std.data.new(std.size()).normal_()
+        return eps.mul(std).add(mu)
+
+    def decode(self, z):
+        z = self.latent_decoder(z)
+        z = z.view(z.size(0), self.enc_channels, self.enc_spatial_dim_x, self.enc_spatial_dim_y)
+        x = self.decoder(z)
+        # Ensure exact output size
+        if x.size(2) != self.patch_size or x.size(3) != self.patch_size:
+            x = nn.functional.interpolate(x, size=(self.patch_size, self.patch_size), 
+                                         mode='bilinear', align_corners=False)
+        return x
+
+    def generate(self):
+        z = torch.randn(self.batch_size, self.latent_dim).to(self.device)
+        x = self.decode(z)
+        x = torch.sigmoid(x)
+        return x
+
+    def forward(self, x):
+        z_mean, z_std = self.encode(x)
+        output_samples = torch.zeros(self.num_samples, x.size(0), self.out_channels, 
+                                     self.patch_size, self.patch_size).to(self.device)
+        classification_samples = torch.zeros(self.num_samples, x.size(0), self.num_classes).to(self.device)
+        for i in range(self.num_samples):
+            z = self.reparameterize(z_mean, z_std)
+            output_samples[i] = self.decode(z)
+            classification_samples[i] = self.classifier(z)
+        return classification_samples, output_samples, z_mean, z_std
+
+
+class HRNetEncoder(TimmEncoder):
+    """HRNet encoder: hrnet_w18, hrnet_w32, hrnet_w48"""
+    def __init__(self, device, num_classes, num_colors, args):
+        model_name = getattr(args, 'encoder_variant', 'hrnet_w18')
+        super().__init__(device, num_classes, num_colors, args, model_name=model_name)

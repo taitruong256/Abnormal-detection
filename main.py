@@ -20,14 +20,16 @@ import time
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Train and evaluate VAE model with open set recognition")
-    parser.add_argument('-b', '--batch-size', default=64, type=int, help='mini-batch size. Default: 16')
+    parser.add_argument('-b', '--batch-size', default=128, type=int, help='mini-batch size. Default: 16')
     parser.add_argument('--learning-rate', default=0.001, type=float, help='initial learning rate. Default: 0.001')
     parser.add_argument('--dataset', type=str, default='BloodMNIST', help="Dataset to use for training and evaluation.")
     parser.add_argument('--dataroot', type=str, default='./data', help='Data root directory. Default: ./data')
     parser.add_argument('--gray-scale', default=False, type=bool, help='use gray scale images. Default: False. If false, single channel images will be repeated to three channels.')
     parser.add_argument('-p', '--patch-size', default=28, type=int, help='patch size for crops. Default: 28')
     parser.add_argument('-j', '--workers', default=4, type=int, help='number of data loading workers. Default: 4')
-    parser.add_argument('-a', '--architecture', default='WRN', help='model architecture. Default: WRN')
+    parser.add_argument('-a', '--architecture', default='WRN', help='model architecture. Options: WRN, MLP, HRNetEncoder. Default: WRN')
+    parser.add_argument('--encoder-variant', default='hrnet_w18', type=str, 
+                       help='Encoder variant (only for HRNetEncoder). Options: hrnet_w18, hrnet_w32, hrnet_w48. Default: hrnet_w18')
     parser.add_argument('--wrn-widen-factor', default=10, type=int, help='width factor of the wide residual network. Default: 10')
     parser.add_argument('--wrn-depth', default=14, type=int, help='amount of layers in the wide residual network. Default: 14')
     parser.add_argument('-bn', '--batch-norm', default=1e-5, type=float, help='batch normalization. Default 1e-5')
@@ -128,6 +130,19 @@ if __name__ == "__main__":
         num_classes = dataset.num_classes
     
     net_init_method = getattr(architectures, args.architecture)
+    
+    # Validate encoder-variant for HRNet
+    if args.architecture == 'HRNetEncoder':
+        valid_variants = ['hrnet_w18', 'hrnet_w32', 'hrnet_w48']
+        if args.encoder_variant not in valid_variants:
+            logger.warning(f"\n{'='*80}")
+            logger.warning(f"WARNING: Invalid encoder-variant '{args.encoder_variant}' for HRNetEncoder")
+            logger.warning(f"Valid options: {', '.join(valid_variants)}")
+            logger.warning(f"Example: --architecture HRNetEncoder --encoder-variant hrnet_w18")
+            logger.warning(f"{'='*80}\n")
+        else:
+            logger.info(f"Using HRNetEncoder with variant: {args.encoder_variant}")
+    
     # build the model
     model = net_init_method(device, num_classes, num_colors, args).to(device)
     # print model summary
