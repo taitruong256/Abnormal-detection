@@ -29,7 +29,7 @@ def parse_args():
     parser.add_argument('-j', '--workers', default=4, type=int, help='number of data loading workers. Default: 4')
     parser.add_argument('-a', '--architecture', default='WRN', help='model architecture. Options: WRN, MLP, HRNetEncoder. Default: WRN')
     parser.add_argument('--encoder-variant', default='hrnet_w18', type=str, 
-                       help='Encoder variant (only for HRNetEncoder). Options: hrnet_w18, hrnet_w32, hrnet_w48. Default: hrnet_w18')
+                       help='Encoder variant (only for HRNetEncoder). Options: hrnet_w18, hrnet_w32, hrnet_w48, hrnet_w64. Default: hrnet_w18')
     parser.add_argument('--wrn-widen-factor', default=10, type=int, help='width factor of the wide residual network. Default: 10')
     parser.add_argument('--wrn-depth', default=14, type=int, help='amount of layers in the wide residual network. Default: 14')
     parser.add_argument('-bn', '--batch-norm', default=1e-5, type=float, help='batch normalization. Default 1e-5')
