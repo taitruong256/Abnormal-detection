@@ -51,6 +51,7 @@ def parse_args():
     parser.add_argument('--num-increment-tasks', default=2, type=int, help='Number of tasks to add at once. Default: 2')
     parser.add_argument('--resume', type=str, default='', help='Path to checkpoint to resume from')
     
+    parser.add_argument('--baseline', type=str, default='openmax', choices=['openmax', 'softmax'], help='Chọn baseline để so sánh: openmax hoặc softmax. Default: openmax')
     return parser.parse_args()
 
 if __name__ == "__main__":

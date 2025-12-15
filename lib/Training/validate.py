@@ -81,10 +81,20 @@ def validate(Dataset, model, criterion, epoch, metrics_logger, device, save_path
             class_output = torch.mean(class_samples, dim=0)
             recon_output = torch.mean(recon_samples, dim=0)
 
-            # measure accuracy, record loss, fill confusion matrix
-            prec1 = accuracy(class_output, target)[0]
-            top1.update(prec1.item(), inp.size(0))
-            confusion.add(class_output.data, target)
+            # --- SOFTMAX BASELINE ---
+            if hasattr(args, 'baseline') and args.baseline == 'softmax':
+                # Chuẩn hóa xác suất bằng softmax
+                softmax_probs = F.softmax(class_output, dim=1)
+                # Lấy nhãn dự đoán
+                preds = torch.argmax(softmax_probs, dim=1)
+                prec1 = (preds == target).float().sum() * 100.0 / inp.size(0)
+                top1.update(prec1.item(), inp.size(0))
+                confusion.add(class_output.data, target)
+            else:
+                # Mặc định: OpenMax hoặc các phương pháp khác
+                prec1 = accuracy(class_output, target)[0]
+                top1.update(prec1.item(), inp.size(0))
+                confusion.add(class_output.data, target)
 
             # measure elapsed time
             batch_time.update(time.time() - end)

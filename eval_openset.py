@@ -12,7 +12,10 @@ Minimum example usage:
 --resume /path/checkpoint.pth.tar --var-samples 100 -a MLP
 """
 
+# import collections
 import collections
+import torch
+from collections import Counter
 # from lib.cmdparser import parser
 import lib.Data.datasets as datasets
 import lib.Model.architectures as architectures
@@ -128,6 +131,7 @@ def parse_args():
     parser.add_argument('--max-train-samples', default=450, type=int, help='maximum number of training samples. Default: None (use all samples)')
     parser.add_argument('--max-test-samples', default=None, type=int, help='maximum number of test samples for openset datasets. Default: None (use all 300K TinyImageNet samples)')
     
+    parser.add_argument('--baseline', type=str, default='openmax', choices=['openmax', 'softmax'], help='Chọn baseline để so sánh: openmax hoặc softmax. Default: openmax')
     return parser.parse_args()
 
 
@@ -406,16 +410,15 @@ def main():
 
     for od, openset_dataset in enumerate(openset_datasets):
         logger.info("Evaluating openset dataset: " + openset_datasets_names[od] + ". This may take a while...")
+
         openset_dataset_eval_dict = eval_openset_dataset(model, openset_dataset.val_loader, num_classes, device,
                                                          samples=args.var_samples, autoregression=args.autoregression,
                                                          calc_reconstruction=args.calc_reconstruction)
 
+        # --- OPENMAX/EVT ---
         openset_distances_to_z_means = calc_distances_to_means(mean_zs, openset_dataset_eval_dict["zs"],
                                                                args.distance_function)
-
         openset_outlier_probs = calc_outlier_probs(weibull_models, openset_distances_to_z_means)
-
-        # getting outlier classification accuracies across the entire datasets
         openset_classification = calc_openset_classification(openset_outlier_probs, num_classes,
                                                              num_outlier_threshs=100)
         openset_entropy_classification = calc_entropy_classification(openset_dataset_eval_dict["out_entropy"],
@@ -424,6 +427,78 @@ def main():
         if args.calc_reconstruction:
             openset_recon_classification_correct = calc_reconstruction_classification(
                 openset_dataset_eval_dict["recon_loss_mus"], max_recon_loss, num_outlier_threshs=1000)
+
+
+        # --- SOFTMAX LABEL (label có score cao nhất, có threshold) ---
+        # Tính max softmax score cho từng mẫu
+        softmax_max_scores = []
+        softmax_preds = []
+        for i in range(len(openset_dataset_eval_dict["zs"][0])):
+            sample_probs = []
+            for c in range(num_classes):
+                if len(openset_dataset_eval_dict["out_mus"][c]) > i:
+                    sample_probs.append(openset_dataset_eval_dict["out_mus"][c][i])
+                else:
+                    sample_probs.append(0.0)
+            sample_probs_tensor = torch.tensor(sample_probs)
+            max_score = sample_probs_tensor.max().item()
+            pred_label = int(sample_probs_tensor.argmax().item())
+            softmax_max_scores.append(max_score)
+            softmax_preds.append(pred_label)
+
+
+        # --- Tự động chọn ngưỡng tối ưu trên tập validation (threshset_eval_dict) ---
+        # Quét các ngưỡng từ 0.5 đến 0.99, chọn ngưỡng sao cho tỷ lệ unknown ~5% (hoặc gần nhất)
+        val_softmax_max_scores = []
+        val_softmax_preds = []
+        val_eval = threshset_eval_dict if 'threshset_eval_dict' in locals() else None
+        if val_eval is not None:
+            for i in range(len(val_eval["zs_correct"][0])):
+                sample_probs = []
+                for c in range(num_classes):
+                    if len(val_eval["out_mus_correct"][c]) > i:
+                        sample_probs.append(val_eval["out_mus_correct"][c][i])
+                    else:
+                        sample_probs.append(0.0)
+                sample_probs_tensor = torch.tensor(sample_probs)
+                val_softmax_max_scores.append(sample_probs_tensor.max().item())
+                val_softmax_preds.append(int(sample_probs_tensor.argmax().item()))
+            best_T = 0.5
+            best_gap = 1.0
+            best_unknown = 1.0
+            for T in [round(x, 3) for x in list(torch.arange(0.5, 0.991, 0.01).numpy())]:
+                unknown_count = sum([score < T for score in val_softmax_max_scores])
+                unknown_rate = unknown_count / len(val_softmax_max_scores)
+                gap = abs(unknown_rate - 0.05)
+                if gap < best_gap:
+                    best_gap = gap
+                    best_T = T
+                    best_unknown = unknown_rate
+            SOFTMAX_THRESHOLD = best_T
+            logger.info(f"[SOFTMAX] Auto-selected threshold={SOFTMAX_THRESHOLD} (unknown rate on val: {best_unknown:.3f})")
+        else:
+            SOFTMAX_THRESHOLD = 0.8
+            logger.info(f"[SOFTMAX] Default threshold={SOFTMAX_THRESHOLD}")
+
+        softmax_final_labels = []
+        for score, label in zip(softmax_max_scores, softmax_preds):
+            if score >= SOFTMAX_THRESHOLD:
+                softmax_final_labels.append(label)
+            else:
+                softmax_final_labels.append(-1)  # -1 là unknown
+        softmax_label_dist = Counter(softmax_final_labels)
+        logger.info(f"[SOFTMAX] {openset_datasets_names[od]} label distribution (top-1, threshold={SOFTMAX_THRESHOLD}, unknown=-1): {dict(softmax_label_dist)}")
+
+        # --- OPENMAX/EVT như cũ ---
+        evt_rejects = []
+        for i in range(len(openset_dataset_eval_dict["zs"][0])):
+            sample_outlier_probs = [openset_outlier_probs[c][i] if len(openset_outlier_probs[c]) > i else 0.0 for c in range(num_classes)]
+            if all([p > EVT_prior for p in sample_outlier_probs]):
+                evt_rejects.append(-1)
+            else:
+                evt_rejects.append(int(torch.tensor(sample_outlier_probs).argmin().item()))
+        evt_label_dist = Counter(evt_rejects)
+        logger.info(f"[OPENMAX/EVT] {openset_datasets_names[od]} label distribution (top-1 or reject=-1): {dict(evt_label_dist)}")
 
         openset_dataset_eval_dicts[openset_datasets_names[od]] = openset_dataset_eval_dict
         openset_outlier_probs_dict[openset_datasets_names[od]] = openset_outlier_probs
