@@ -1178,6 +1178,14 @@ def visualize_openset_confusion_matrix(known_eval_dict, openset_eval_dicts,
     precision_close = precision_score(y_true, y_pred, pos_label=0)
     f1_close = f1_score(y_true, y_pred, pos_label=0)
 
+
+    plt.tight_layout(rect=[0, 0.05, 1, 1])
+
+    # Save figure
+    save_file = os.path.join(save_path, f'{known_dataset_name}_OSR_confusion_EVT.png')
+    plt.savefig(save_file, dpi=150, bbox_inches='tight')
+    plt.close(fig)
+
     logger.info(f"✓ OSR confusion matrix (EVT) saved: {save_file}")
     logger.info(f"  Known accuracy (per-class): {known_acc:.2f}%")
     logger.info(f"  Unknown detection (TPR): {unknown_recall:.2f}%")
@@ -1186,13 +1194,6 @@ def visualize_openset_confusion_matrix(known_eval_dict, openset_eval_dicts,
     logger.info(f"    Accuracy: {acc:.4f}")
     logger.info(f"    Recall (open): {recall_open:.4f}, Precision (open): {precision_open:.4f}, F1 (open): {f1_open:.4f}")
     logger.info(f"    Recall (close): {recall_close:.4f}, Precision (close): {precision_close:.4f}, F1 (close): {f1_close:.4f}")
-
-    plt.tight_layout(rect=[0, 0.05, 1, 1])
-
-    # Save figure
-    save_file = os.path.join(save_path, f'{known_dataset_name}_OSR_confusion_EVT.png')
-    plt.savefig(save_file, dpi=150, bbox_inches='tight')
-    plt.close(fig)
 
 
 def visualize_openset_binary_confusion_matrix(known_eval_dict, openset_eval_dicts, 
