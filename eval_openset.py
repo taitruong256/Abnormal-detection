@@ -448,55 +448,72 @@ def main():
             softmax_preds.append(pred_label)
 
 
-        # --- Tự động chọn ngưỡng tối ưu trên tập validation (threshset_eval_dict) ---
-        # Quét các ngưỡng từ 0.5 đến 0.99, chọn ngưỡng sao cho tỷ lệ unknown ~5% (hoặc gần nhất)
-        val_softmax_max_scores = []
-        val_softmax_preds = []
-        val_eval = threshset_eval_dict if 'threshset_eval_dict' in locals() else None
-        if val_eval is not None:
-            for i in range(len(val_eval["zs_correct"][0])):
+
+        # --- [UPDATED] SOFTMAX OSR: Chọn ngưỡng trên tập validation (threshset_eval_dict), áp dụng lên openset ---
+        best_threshold = 0.1 
+        if 'threshset_eval_dict' in locals() and threshset_eval_dict is not None and 'labels' in threshset_eval_dict:
+            val_labels = threshset_eval_dict['labels']
+            val_softmax_max_scores = []
+            val_softmax_preds = []
+            for i in range(len(threshset_eval_dict["zs_correct"][0])):
                 sample_probs = []
                 for c in range(num_classes):
-                    if len(val_eval["out_mus_correct"][c]) > i:
-                        sample_probs.append(val_eval["out_mus_correct"][c][i])
+                    if len(threshset_eval_dict["out_mus_correct"][c]) > i:
+                        sample_probs.append(threshset_eval_dict["out_mus_correct"][c][i])
                     else:
                         sample_probs.append(0.0)
                 sample_probs_tensor = torch.tensor(sample_probs)
                 val_softmax_max_scores.append(sample_probs_tensor.max().item())
                 val_softmax_preds.append(int(sample_probs_tensor.argmax().item()))
-            best_T = 0.5
-            best_gap = 1.0
-            best_unknown = 1.0
-            for T in [round(x, 3) for x in list(torch.arange(0.5, 0.991, 0.01).numpy())]:
-                unknown_count = sum([score < T for score in val_softmax_max_scores])
-                unknown_rate = unknown_count / len(val_softmax_max_scores)
-                gap = abs(unknown_rate - 0.05)
-                if gap < best_gap:
-                    best_gap = gap
-                    best_T = T
-                    best_unknown = unknown_rate
-            SOFTMAX_THRESHOLD = best_T
-            logger.info(f"[SOFTMAX] Auto-selected threshold={SOFTMAX_THRESHOLD} (unknown rate on val: {best_unknown:.3f})")
-        else:
-            SOFTMAX_THRESHOLD = 0.8
-            logger.info(f"[SOFTMAX] Default threshold={SOFTMAX_THRESHOLD}")
+            best_f1 = -1
+            thresholds = np.arange(0.1, 1.001, 0.01)
+            for T in thresholds:
+                pred_osr = []
+                for score, label in zip(val_softmax_max_scores, val_softmax_preds):
+                    if score >= T:
+                        pred_osr.append(label)
+                    else:
+                        pred_osr.append(-1)
+                gt_bin = [0 if l < num_classes else 1 for l in val_labels]
+                pred_bin = [0 if l != -1 else 1 for l in pred_osr]
+                f1 = f1_score(gt_bin, pred_bin, zero_division=0)
+                if f1 > best_f1:
+                    best_f1 = f1
+                    best_threshold = T
+            logger.info(f"[SOFTMAX][OSR] Selected threshold on validation: {best_threshold:.2f} (best F1: {best_f1:.4f})")
 
-        softmax_final_labels = []
-        for score, label in zip(softmax_max_scores, softmax_preds):
-            if score >= SOFTMAX_THRESHOLD:
-                softmax_final_labels.append(label)
-            else:
-                softmax_final_labels.append(-1)  # -1 là unknown
-        softmax_label_dist = Counter(softmax_final_labels)
-        logger.info(f"[SOFTMAX] {openset_datasets_names[od]} label distribution (top-1, threshold={SOFTMAX_THRESHOLD}, unknown=-1): {dict(softmax_label_dist)}")
+        # Áp dụng ngưỡng này lên openset
+        gt_labels = openset_dataset_eval_dict.get("labels", None)
+        if gt_labels is not None:
+            softmax_final_labels = []
+            for score, label in zip(softmax_max_scores, softmax_preds):
+                if score >= best_threshold:
+                    softmax_final_labels.append(label)
+                else:
+                    softmax_final_labels.append(-1)
+            softmax_label_dist = Counter(softmax_final_labels)
+            # Đánh giá OSR trên openset
+            gt_bin = [0 if l < num_classes else 1 for l in gt_labels]
+            pred_bin = [0 if l != -1 else 1 for l in softmax_final_labels]
+            acc = accuracy_score(gt_bin, pred_bin)
+            prec = precision_score(gt_bin, pred_bin, zero_division=0)
+            rec = recall_score(gt_bin, pred_bin, zero_division=0)
+            f1 = f1_score(gt_bin, pred_bin, zero_division=0)
+            cm = confusion_matrix(gt_bin, pred_bin)
+            logger.info(f"[SOFTMAX][OSR] {openset_datasets_names[od]} label distribution (top-1, threshold={best_threshold:.2f}, unknown=-1): {dict(softmax_label_dist)}")
+            logger.info(f"[SOFTMAX][OSR] {openset_datasets_names[od]} Accuracy: {acc:.4f}")
+            logger.info(f"[SOFTMAX][OSR] {openset_datasets_names[od]} Precision: {prec:.4f}")
+            logger.info(f"[SOFTMAX][OSR] {openset_datasets_names[od]} Recall: {rec:.4f}")
+            logger.info(f"[SOFTMAX][OSR] {openset_datasets_names[od]} F1: {f1:.4f}")
+            logger.info(f"[SOFTMAX][OSR] {openset_datasets_names[od]} Confusion matrix (rows=true, cols=pred):\n{cm}")
 
         # --- [ADDED] SOFTMAX OSR EVALUATION WITH AUTO THRESHOLD SELECTION (0.5-1.0, step 0.01, best F1) ---
         gt_labels = openset_dataset_eval_dict.get("labels", None)
         if gt_labels is not None:
             best_f1 = -1
-            best_threshold = 0.5
+            best_threshold = 0.2
             best_metrics = None
-            thresholds = np.arange(0.5, 1, 0.01)
+            thresholds = np.arange(0.2, 1, 0.01)
             for T in thresholds:
                 pred_osr = []
                 for score, label in zip(softmax_max_scores, softmax_preds):
