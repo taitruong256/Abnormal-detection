@@ -28,6 +28,7 @@ import argparse
 import torch
 import os
 import numpy as np
+from sklearn.metrics import confusion_matrix, f1_score, accuracy_score, precision_score, recall_score
 import logging
 from datetime import datetime
 
@@ -488,6 +489,43 @@ def main():
                 softmax_final_labels.append(-1)  # -1 là unknown
         softmax_label_dist = Counter(softmax_final_labels)
         logger.info(f"[SOFTMAX] {openset_datasets_names[od]} label distribution (top-1, threshold={SOFTMAX_THRESHOLD}, unknown=-1): {dict(softmax_label_dist)}")
+
+        # --- [ADDED] SOFTMAX OSR EVALUATION WITH AUTO THRESHOLD SELECTION (0.5-1.0, step 0.01, best F1) ---
+        gt_labels = openset_dataset_eval_dict.get("labels", None)
+        if gt_labels is not None:
+            best_f1 = -1
+            best_threshold = 0.5
+            best_metrics = None
+            thresholds = np.arange(0.5, 1, 0.01)
+            for T in thresholds:
+                pred_osr = []
+                for score, label in zip(softmax_max_scores, softmax_preds):
+                    if score >= T:
+                        pred_osr.append(label)
+                    else:
+                        pred_osr.append(-1)  # -1 = unknown
+                # Binary: known (0), unknown (1)
+                gt_bin = [0 if l < num_classes else 1 for l in gt_labels]
+                pred_bin = [0 if l != -1 else 1 for l in pred_osr]
+                f1 = f1_score(gt_bin, pred_bin, zero_division=0)
+                if f1 > best_f1:
+                    best_f1 = f1
+                    best_threshold = T
+                    best_metrics = {
+                        'accuracy': accuracy_score(gt_bin, pred_bin),
+                        'precision': precision_score(gt_bin, pred_bin, zero_division=0),
+                        'recall': recall_score(gt_bin, pred_bin, zero_division=0),
+                        'f1': f1,
+                        'confusion_matrix': confusion_matrix(gt_bin, pred_bin)
+                    }
+            logger.info(f"[SOFTMAX][OSR] {openset_datasets_names[od]} Best threshold: {best_threshold:.2f}")
+            logger.info(f"[SOFTMAX][OSR] {openset_datasets_names[od]} Accuracy: {best_metrics['accuracy']:.4f}")
+            logger.info(f"[SOFTMAX][OSR] {openset_datasets_names[od]} Precision: {best_metrics['precision']:.4f}")
+            logger.info(f"[SOFTMAX][OSR] {openset_datasets_names[od]} Recall: {best_metrics['recall']:.4f}")
+            logger.info(f"[SOFTMAX][OSR] {openset_datasets_names[od]} F1: {best_metrics['f1']:.4f}")
+            logger.info(f"[SOFTMAX][OSR] {openset_datasets_names[od]} Confusion matrix (rows=true, cols=pred):\n{best_metrics['confusion_matrix']}")
+        else:
+            logger.warning(f"[SOFTMAX][OSR] {openset_datasets_names[od]}: No ground-truth labels found in openset_dataset_eval_dict['labels'].")
 
         # --- OPENMAX/EVT như cũ ---
         evt_rejects = []
