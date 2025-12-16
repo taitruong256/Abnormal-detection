@@ -1,3 +1,4 @@
+
 import torch
 import torchvision
 import os
@@ -13,6 +14,7 @@ from PIL import Image
 from matplotlib.gridspec import GridSpec
 import logging
 import json
+from sklearn.metrics import accuracy_score, recall_score, precision_score, f1_score, confusion_matrix
 
 # matplotlib backend, required for plotting of images to tensorboard
 matplotlib.use('Agg')
@@ -1134,35 +1136,147 @@ def visualize_openset_confusion_matrix(known_eval_dict, openset_eval_dicts,
                  fontsize=title_font_size)
     ax2.tick_params(labelsize=ticks_font_size-8, rotation=45)
     
+
     # Add statistics
     known_correct = np.diag(confusion_matrix[:num_classes, :num_classes]).sum()
     known_total = confusion_matrix[:num_classes, :].sum()
     unknown_rejected = confusion_matrix[num_classes, num_classes]
     unknown_total = confusion_matrix[num_classes, :].sum()
-    
+
     known_acc = (known_correct / known_total * 100) if known_total > 0 else 0
     unknown_recall = (unknown_rejected / unknown_total * 100) if unknown_total > 0 else 0
     fpr = ((confusion_matrix[:num_classes, num_classes].sum()) / known_total * 100) if known_total > 0 else 0
-    
-    stats_text = (f"Known Accuracy: {known_acc:.2f}%\n"
-                 f"Unknown Detection (TPR): {unknown_recall:.2f}%\n"
-                 f"False Positive Rate: {fpr:.2f}%\n"
-                 f"Known samples: {int(known_total)}\n"
-                 f"Unknown samples: {int(unknown_total)}")
-    
-    fig.text(0.5, 0.02, stats_text, ha='center', fontsize=legend_font_size, 
-            bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
-    
+
+    # Metrics for binary close/open (for reference)
+    y_true = []
+    y_pred = []
+    # Known set (close set):
+    for class_idx in range(num_classes):
+        outlier_probs = outlier_probs_correct[class_idx]
+        for i in range(len(outlier_probs)):
+            y_true.append(0)  # true close
+            if outlier_probs[i] > evt_threshold:
+                y_pred.append(1)  # predicted open (FP)
+            else:
+                y_pred.append(0)  # predicted close (TP)
+    # Open set:
+    for openset_name, openset_eval_dict in openset_eval_dicts.items():
+        for class_idx in range(num_classes):
+            outlier_probs = openset_outlier_probs_dict[openset_name][class_idx]
+            for i in range(len(outlier_probs)):
+                y_true.append(1)  # true open
+                if outlier_probs[i] > evt_threshold:
+                    y_pred.append(1)  # predicted open (TN)
+                else:
+                    y_pred.append(0)  # predicted close (FN)
+
+    acc = accuracy_score(y_true, y_pred)
+    recall_open = recall_score(y_true, y_pred, pos_label=1)
+    precision_open = precision_score(y_true, y_pred, pos_label=1)
+    f1_open = f1_score(y_true, y_pred, pos_label=1)
+    recall_close = recall_score(y_true, y_pred, pos_label=0)
+    precision_close = precision_score(y_true, y_pred, pos_label=0)
+    f1_close = f1_score(y_true, y_pred, pos_label=0)
+
+    logger.info(f"✓ OSR confusion matrix (EVT) saved: {save_file}")
+    logger.info(f"  Known accuracy (per-class): {known_acc:.2f}%")
+    logger.info(f"  Unknown detection (TPR): {unknown_recall:.2f}%")
+    logger.info(f"  False Positive Rate: {fpr:.2f}%")
+    logger.info(f"  [Binary metrics]")
+    logger.info(f"    Accuracy: {acc:.4f}")
+    logger.info(f"    Recall (open): {recall_open:.4f}, Precision (open): {precision_open:.4f}, F1 (open): {f1_open:.4f}")
+    logger.info(f"    Recall (close): {recall_close:.4f}, Precision (close): {precision_close:.4f}, F1 (close): {f1_close:.4f}")
+
     plt.tight_layout(rect=[0, 0.05, 1, 1])
-    
+
     # Save figure
     save_file = os.path.join(save_path, f'{known_dataset_name}_OSR_confusion_EVT.png')
     plt.savefig(save_file, dpi=150, bbox_inches='tight')
     plt.close(fig)
+
+
+def visualize_openset_binary_confusion_matrix(known_eval_dict, openset_eval_dicts, 
+                                             outlier_probs_correct, openset_outlier_probs_dict,
+                                             evt_threshold, known_dataset_name, num_classes, save_path):
+    """
+    Visualize 2x2 confusion matrix for Open Set Recognition (close vs open set).
+    Logs accuracy, recall, precision, f1, etc.
     
-    logger.info(f"✓ OSR confusion matrix (EVT) saved: {save_file}")
-    logger.info(f"  Known accuracy: {known_acc:.2f}%")
-    logger.info(f"  Unknown detection (TPR): {unknown_recall:.2f}%")
-    logger.info(f"  False Positive Rate: {fpr:.2f}%")
+    Parameters:
+        known_eval_dict (dict): Evaluation results for known dataset
+        openset_eval_dicts (dict): Dict of evaluation results for openset datasets
+        outlier_probs_correct (list): Weibull outlier probabilities for known dataset
+        openset_outlier_probs_dict (dict): Dict of Weibull outlier probs for openset datasets
+        evt_threshold (float): Threshold for EVT method
+        known_dataset_name (str): Name of known dataset
+        num_classes (int): Number of known classes
+        save_path (str): Path to save visualization
+    """
+    logger = logging.getLogger()
+    logger.info(f"[visualize_openset_binary_confusion_matrix] Drawing 2x2 close/open confusion matrix...")
+
+    # y_true: 0=close, 1=open; y_pred: 0=close, 1=open
+    y_true = []
+    y_pred = []
+
+    # Known set (close set):
+    for class_idx in range(num_classes):
+        outlier_probs = outlier_probs_correct[class_idx]
+        for i in range(len(outlier_probs)):
+            y_true.append(0)  # true close
+            if outlier_probs[i] > evt_threshold:
+                y_pred.append(1)  # predicted open (FP)
+            else:
+                y_pred.append(0)  # predicted close (TP)
+
+    # Open set:
+    for openset_name, openset_eval_dict in openset_eval_dicts.items():
+        for class_idx in range(num_classes):
+            outlier_probs = openset_outlier_probs_dict[openset_name][class_idx]
+            for i in range(len(outlier_probs)):
+                y_true.append(1)  # true open
+                if outlier_probs[i] > evt_threshold:
+                    y_pred.append(1)  # predicted open (TN)
+                else:
+                    y_pred.append(0)  # predicted close (FN)
+
+    # Compute confusion matrix
+    cm = confusion_matrix(y_true, y_pred, labels=[0,1])
+    # cm: rows = true, cols = pred
+    # [[TP, FP],
+    #  [FN, TN]]
+
+    acc = accuracy_score(y_true, y_pred)
+    recall = recall_score(y_true, y_pred, pos_label=1)
+    precision = precision_score(y_true, y_pred, pos_label=1)
+    f1 = f1_score(y_true, y_pred, pos_label=1)
+
+    logger.info(f"[visualize_openset_binary_confusion_matrix] Confusion matrix (rows=true, cols=pred):\n{cm}")
+    logger.info(f"[visualize_openset_binary_confusion_matrix] Accuracy: {acc:.4f}")
+    logger.info(f"[visualize_openset_binary_confusion_matrix] Recall: {recall:.4f}, Precision: {precision:.4f}, F1: {f1:.4f}")
+
+    # Plot
+    fig, ax = plt.subplots(figsize=(8, 7))
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
+                xticklabels=['Close', 'Open'], yticklabels=['Close', 'Open'],
+                ax=ax, cbar_kws={'label': 'Count'}, linewidths=1, linecolor='gray')
+    ax.set_xlabel('Predicted Label', fontsize=16)
+    ax.set_ylabel('True Label', fontsize=16)
+    ax.set_title(f'OSR 2x2 Confusion Matrix\n{known_dataset_name} (Close vs Open)', fontsize=18)
+
+    # Add metrics as text box
+    stats_text = (f"Accuracy: {acc:.2%}\n"
+                  f"Recall: {recall:.2%}\n"
+                  f"Precision: {precision:.2%}\n"
+                  f"F1: {f1:.2%}")
+    plt.gcf().text(0.99, 0.01, stats_text, fontsize=13, ha='right', va='bottom', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+
+    plt.tight_layout(rect=[0, 0.05, 1, 1])
+    save_file = os.path.join(save_path, f'{known_dataset_name}_OSR_confusion_EVT_binary.png')
+    plt.savefig(save_file, dpi=150, bbox_inches='tight')
+    plt.close(fig)
+    logger.info(f"✓ OSR 2x2 confusion matrix (EVT) saved: {save_file}")
+    logger.info(f"  - Accuracy: {acc:.4f}")
+    logger.info(f"  - Recall (open): {recall:.4f}, Precision (open): {precision:.4f}, F1 (open): {f1:.4f}")
 
 
