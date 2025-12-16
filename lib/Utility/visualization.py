@@ -68,7 +68,6 @@ def visualize_image_grid(images, writer, count, name, save_path):
         name (str): name of the file to save.
         save_path (str): path where image grid is going to be saved.
     """
-    import logging
     logger = logging.getLogger()
     logger.info(f"Creating image grid: {name} (epoch {count})...")
     size = images.size(0)
@@ -92,7 +91,6 @@ def visualize_confusion(writer, step, matrix, class_dict, save_path):
             corresponding integer labels/targets as values.
         save_path (str): Path used for saving
     """
-    import logging
     logger = logging.getLogger()
     
     logger.info(f"Creating confusion matrix (step {step})...")
@@ -135,7 +133,6 @@ def visualize_confusion_heatmap(writer, step, matrix, class_dict, save_path, kno
         save_path (str): Path used for saving.
         known_classes (list): List of known class indices to display. If None, show all classes.
     """
-    import logging
     logger = logging.getLogger()
     
     logger.info(f"Creating confusion matrix heatmap (step {step})...")
@@ -203,7 +200,7 @@ def visualize_confusion_heatmap(writer, step, matrix, class_dict, save_path, kno
     ax.set_ylabel("True Class", fontsize=16, fontweight="bold")
     
     title_suffix = " (Known Classes Only)" if known_classes is not None else ""
-    ax.set_title(f"Confusion Matrix – Epoch {step}{title_suffix}", fontsize=18, fontweight="bold", pad=20)
+    ax.set_title(f"Confusion Matrix – Epoch {step}", fontsize=18, fontweight="bold", pad=20)
 
     ax.tick_params(axis="both", labelsize=tick_font)
 
@@ -228,7 +225,6 @@ def visualize_dataset_in_2d_embedding(writer, encoding_list, dataset_name, save_
         save_path (str): Path used for saving.
         task (int): task counter. Used for naming.
     """
-    import logging
     logger = logging.getLogger()
 
     logger.info(f"Creating 2D latent space visualization for {dataset_name} (task {task})...")
@@ -738,7 +734,7 @@ def plot_training_metrics(save_path):
             data = train_metrics[train_full_key]
             steps = [d['step'] for d in data]
             values = [d['value'] for d in data]
-            ax.plot(steps, values, 'b-o', label='Training', linewidth=2, markersize=6, alpha=0.8)
+            ax.plot(steps, values, color='steelblue', label='Training', linewidth=2, alpha=0.8)
             logger.info(f"  ✓ Plotted {train_key}: {len(steps)} points")
             has_data = True
         
@@ -747,7 +743,7 @@ def plot_training_metrics(save_path):
             data = val_metrics[val_full_key]
             steps = [d['step'] for d in data]
             values = [d['value'] for d in data]
-            ax.plot(steps, values, 'r-s', label='Validation', linewidth=2, markersize=6, alpha=0.8)
+            ax.plot(steps, values, color='indianred', label='Validation', linewidth=2, alpha=0.8)
             logger.info(f"  ✓ Plotted {val_key}: {len(steps)} points")
             has_data = True
         
@@ -789,7 +785,6 @@ def visualize_class_distribution(dataset, dataset_name, save_path, split='train'
         save_path (str): Path to save the visualization
         split (str): Dataset split ('train', 'val', 'test', or 'all')
     """
-    import logging
     logger = logging.getLogger()
     
     logger.info(f"Creating class distribution visualization for {dataset_name} ({split} set)...")
@@ -823,7 +818,7 @@ def visualize_class_distribution(dataset, dataset_name, save_path, split='train'
     class_counts = {}
     total_samples = 0
     
-    for loader in loaders:
+    for loaclass_distribution_der in loaders:
         for _, labels in loader:
             for label in labels:
                 label_item = label.item()
@@ -846,17 +841,21 @@ def visualize_class_distribution(dataset, dataset_name, save_path, split='train'
     bars = ax.bar(x_pos, counts, color=sns.color_palette("Set2", len(class_names)), 
                   edgecolor='black', linewidth=1.5, alpha=0.8)
     
-    # Add value labels on top of bars
+
+    # Add value labels on top of bars 
+    max_count = max(counts)
     for i, (bar, count) in enumerate(zip(bars, counts)):
         height = bar.get_height()
         ax.text(bar.get_x() + bar.get_width()/2., height,
-                f'{count}\n({count/total_samples*100:.1f}%)',
+                f'{count}',
                 ha='center', va='bottom', fontsize=legend_font_size-6, fontweight='bold')
+
+    ax.set_ylim(0, max_count * 1.15)
     
     ax.set_xlabel('Class', fontsize=axes_font_size)
     ax.set_ylabel('Number of Samples', fontsize=axes_font_size)
     
-    title_text = f'{dataset_name} - Class Distribution ({split.capitalize()} Set)\nTotal: {total_samples} samples'
+    title_text = f'{dataset_name} - Class Distribution ({split.capitalize()} Set)'
     if split == 'all':
         title_text = f'{dataset_name} - Class Distribution (All Data)\nTotal: {total_samples} samples'
     ax.set_title(title_text, fontsize=title_font_size)
@@ -894,7 +893,6 @@ def visualize_openset_2d_embedding(known_embeddings, unknown_embeddings_dict,
         save_path (str): Path to save the visualization
         num_classes (int): Number of known classes
     """
-    import logging
     logger = logging.getLogger()
     
     logger.info(f"Creating 2D open-set embedding visualization...")
@@ -1065,7 +1063,6 @@ def visualize_openset_confusion_matrix(known_eval_dict, openset_eval_dicts,
         num_classes (int): Number of known classes
         save_path (str): Path to save visualization
     """
-    import logging
     logger = logging.getLogger()
     
     logger.info(f"Creating Open-Set Recognition confusion matrices...")
