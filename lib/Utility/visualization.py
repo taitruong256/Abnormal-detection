@@ -818,7 +818,7 @@ def visualize_class_distribution(dataset, dataset_name, save_path, split='train'
     class_counts = {}
     total_samples = 0
     
-    for loaclass_distribution_der in loaders:
+    for loader in loaders:
         for _, labels in loader:
             for label in labels:
                 label_item = label.item()
