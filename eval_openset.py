@@ -550,6 +550,9 @@ def main():
                                       outlier_probs_correct, openset_outlier_probs_dict,
                                       EVT_prior, entropy_threshold,
                                       args.dataset, num_classes, save_path)
+    visualize_openset_binary_confusion_matrix(dataset_eval_dict, openset_dataset_eval_dicts,
+                                             outlier_probs_correct, openset_outlier_probs_dict,
+                                             EVT_prior, args.dataset, num_classes, save_path)
     logger.info("="*80)
 
     # histograms
