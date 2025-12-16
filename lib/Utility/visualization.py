@@ -1276,6 +1276,7 @@ def visualize_openset_binary_confusion_matrix(known_eval_dict, openset_eval_dict
     save_file = os.path.join(save_path, f'{known_dataset_name}_OSR_confusion_EVT_binary.png')
     plt.savefig(save_file, dpi=150, bbox_inches='tight')
     plt.close(fig)
+    logger.info(f"Confusion matrix:\n{cm.tolist()}")
     logger.info(f"✓ OSR 2x2 confusion matrix (EVT) saved: {save_file}")
     logger.info(f"  - Accuracy: {acc:.4f}")
     logger.info(f"  - Recall (open): {recall:.4f}, Precision (open): {precision:.4f}, F1 (open): {f1:.4f}")
