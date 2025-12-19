@@ -249,6 +249,10 @@ def eval_openset_dataset(model, data_loader, num_classes, device, samples=1,
 
     out_entropy = []
 
+    labels = []
+    preds = []
+    max_softmax_scores = []
+
     recon_loss_mus = []
     recon_loss_sigmas = []
 
