@@ -93,7 +93,7 @@ if __name__ == "__main__":
         logger.info(f"  Max Samples (Testing Mode): Train={args.max_samples}, Val={args.max_samples // 4}")
     
     # Setup known classes for MedMNIST datasets
-    medmnist_datasets = ['bloodmnist', 'octmnist', 'dermamnist', 'tissuemnist']
+    medmnist_datasets = ['bloodmnist', 'octmnist', 'dermamnist', 'tissuemnist', 'pathmnist']
     if args.dataset.lower() in medmnist_datasets:
         logger.info(f"\nLoading MedMNIST dataset: {args.dataset}")
         
