@@ -7,6 +7,7 @@ from tqdm import tqdm
 from lib.Utility.metrics import AverageMeter
 from lib.Utility.metrics import ConfusionMeter
 from lib.Utility.metrics import accuracy
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 from lib.Utility.visualization import visualize_confusion, visualize_confusion_heatmap
 from lib.Utility.visualization import visualize_image_grid
 from lib.Utility.visualization import visualize_dataset_in_2d_embedding
@@ -47,6 +48,9 @@ def validate(Dataset, model, criterion, epoch, metrics_logger, device, save_path
 
     # confusion matrix
     confusion = ConfusionMeter(model.num_classes, normalized=True)
+
+    all_targets = []
+    all_preds = []
 
     # switch to evaluate mode
     model.eval()
@@ -95,6 +99,11 @@ def validate(Dataset, model, criterion, epoch, metrics_logger, device, save_path
                 prec1 = accuracy(class_output, target)[0]
                 top1.update(prec1.item(), inp.size(0))
                 confusion.add(class_output.data, target)
+
+                preds = torch.argmax(class_output, dim=1)
+
+            all_targets.extend(target.detach().cpu().tolist())
+            all_preds.extend(preds.detach().cpu().tolist())
 
             # measure elapsed time
             batch_time.update(time.time() - end)
@@ -150,6 +159,43 @@ def validate(Dataset, model, criterion, epoch, metrics_logger, device, save_path
         metrics_logger.add_scalar('validation/val_KLD', kld_losses.avg, epoch)
 
     logger.info(' * Validation: Loss {loss.avg:.5f} Prec@1 {top1.avg:.3f}'.format(loss=losses, top1=top1))
+
+    if len(all_targets) > 0 and len(all_preds) == len(all_targets):
+        val_acc = accuracy_score(all_targets, all_preds)
+        val_precision_macro = precision_score(all_targets, all_preds, average='macro', zero_division=0)
+        val_recall_macro = recall_score(all_targets, all_preds, average='macro', zero_division=0)
+        val_f1_macro = f1_score(all_targets, all_preds, average='macro', zero_division=0)
+
+        val_precision_micro = precision_score(all_targets, all_preds, average='micro', zero_division=0)
+        val_recall_micro = recall_score(all_targets, all_preds, average='micro', zero_division=0)
+        val_f1_micro = f1_score(all_targets, all_preds, average='micro', zero_division=0)
+
+        val_precision_weighted = precision_score(all_targets, all_preds, average='weighted', zero_division=0)
+        val_recall_weighted = recall_score(all_targets, all_preds, average='weighted', zero_division=0)
+        val_f1_weighted = f1_score(all_targets, all_preds, average='weighted', zero_division=0)
+
+        logger.info(f"validation/val_accuracy: {val_acc * 100:.6f} (step {epoch})")
+        logger.info(f"validation/val_precision_macro: {val_precision_macro * 100:.6f} (step {epoch})")
+        logger.info(f"validation/val_recall_macro: {val_recall_macro * 100:.6f} (step {epoch})")
+        logger.info(f"validation/val_f1_macro: {val_f1_macro * 100:.6f} (step {epoch})")
+        logger.info(f"validation/val_precision_micro: {val_precision_micro * 100:.6f} (step {epoch})")
+        logger.info(f"validation/val_recall_micro: {val_recall_micro * 100:.6f} (step {epoch})")
+        logger.info(f"validation/val_f1_micro: {val_f1_micro * 100:.6f} (step {epoch})")
+        logger.info(f"validation/val_precision_weighted: {val_precision_weighted * 100:.6f} (step {epoch})")
+        logger.info(f"validation/val_recall_weighted: {val_recall_weighted * 100:.6f} (step {epoch})")
+        logger.info(f"validation/val_f1_weighted: {val_f1_weighted * 100:.6f} (step {epoch})")
+
+        if metrics_logger:
+            metrics_logger.add_scalar('validation/val_accuracy', val_acc * 100, epoch)
+            metrics_logger.add_scalar('validation/val_precision_macro', val_precision_macro * 100, epoch)
+            metrics_logger.add_scalar('validation/val_recall_macro', val_recall_macro * 100, epoch)
+            metrics_logger.add_scalar('validation/val_f1_macro', val_f1_macro * 100, epoch)
+            metrics_logger.add_scalar('validation/val_precision_micro', val_precision_micro * 100, epoch)
+            metrics_logger.add_scalar('validation/val_recall_micro', val_recall_micro * 100, epoch)
+            metrics_logger.add_scalar('validation/val_f1_micro', val_f1_micro * 100, epoch)
+            metrics_logger.add_scalar('validation/val_precision_weighted', val_precision_weighted * 100, epoch)
+            metrics_logger.add_scalar('validation/val_recall_weighted', val_recall_weighted * 100, epoch)
+            metrics_logger.add_scalar('validation/val_f1_weighted', val_f1_weighted * 100, epoch)
 
     # At the end of training isolated, or at the end of every task visualize the confusion matrix
     if (epoch + 1) % args.epochs == 0 and epoch > 0:

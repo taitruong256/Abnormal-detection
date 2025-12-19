@@ -365,6 +365,18 @@ def main():
         logger.info("Reconstruction loss threshold: " + str(recon_threshold))
 
     # ------------------------------------------------------------------------------------------
+    # Baseline: MaxSoftmax thresholding (calibrate on threshset to accept 95% inliers)
+    # ------------------------------------------------------------------------------------------
+    # Accept if max_softmax_score >= T_softmax.
+    # Choose T_softmax such that rejection rate on inlier threshset is approximately percent_validation_outliers.
+    threshset_max_scores = np.array(threshset_eval_dict.get("max_softmax_scores", []), dtype=np.float64)
+    if threshset_max_scores.size > 0:
+        softmax_threshold = float(np.quantile(threshset_max_scores, args.percent_validation_outliers))
+    else:
+        softmax_threshold = 0.5
+    logger.info(f"Softmax threshold (MaxSoftmax) at {int((1.0 - args.percent_validation_outliers) * 100)}% validation inliers: {softmax_threshold}")
+
+    # ------------------------------------------------------------------------------------------
     # Fitting on train dataset complete. Beginning of all testing/open set recognition on validation and unknown sets.
     # ------------------------------------------------------------------------------------------
     # We evaluate the validation set to later evaluate trained dataset's statistical inlier/outlier estimates.
@@ -398,6 +410,14 @@ def main():
         logger.info(args.dataset + '(trained) reconstruction loss outlier percentage: ' +
               str(dataset_recon_classification_correct["reconstruction_outlier_percentage"][recon_threshold_index]))
 
+    # Softmax baseline on inlier validation set
+    val_max_scores = np.array(dataset_eval_dict.get("max_softmax_scores", []), dtype=np.float64)
+    if val_max_scores.size > 0:
+        softmax_outlier_percentage_val = float(np.mean(val_max_scores < softmax_threshold))
+        logger.info(args.dataset + '(trained) softmax outlier percentage: ' + str(softmax_outlier_percentage_val))
+    else:
+        logger.warning(args.dataset + "(trained) softmax outlier percentage: unavailable (missing max_softmax_scores)")
+
     # ------------------------------------------------------------------------------------------
     # Repeat process for open set recognition (no fitting, just testing) on all unseen datasets
     # ------------------------------------------------------------------------------------------
@@ -406,6 +426,7 @@ def main():
     openset_outlier_probs_dict = collections.OrderedDict()
     openset_classification_dict = collections.OrderedDict()
     openset_entropy_classification_dict = collections.OrderedDict()
+    openset_softmax_outlier_percentage_dict = collections.OrderedDict()
     if args.calc_reconstruction:
         openset_recon_classification_dict = collections.OrderedDict()
 
@@ -429,120 +450,14 @@ def main():
             openset_recon_classification_correct = calc_reconstruction_classification(
                 openset_dataset_eval_dict["recon_loss_mus"], max_recon_loss, num_outlier_threshs=1000)
 
-
-        # --- SOFTMAX LABEL (label có score cao nhất, có threshold) ---
-        # Tính max softmax score cho từng mẫu
-        softmax_max_scores = []
-        softmax_preds = []
-        for i in range(len(openset_dataset_eval_dict["zs"][0])):
-            sample_probs = []
-            for c in range(num_classes):
-                if len(openset_dataset_eval_dict["out_mus"][c]) > i:
-                    sample_probs.append(openset_dataset_eval_dict["out_mus"][c][i])
-                else:
-                    sample_probs.append(0.0)
-            sample_probs_tensor = torch.tensor(sample_probs)
-            max_score = sample_probs_tensor.max().item()
-            pred_label = int(sample_probs_tensor.argmax().item())
-            softmax_max_scores.append(max_score)
-            softmax_preds.append(pred_label)
-
-
-
-        # --- [UPDATED] SOFTMAX OSR: Chọn ngưỡng trên tập validation (threshset_eval_dict), áp dụng lên openset ---
-        best_threshold = 0.1 
-        if 'threshset_eval_dict' in locals() and threshset_eval_dict is not None and 'labels' in threshset_eval_dict:
-            val_labels = threshset_eval_dict['labels']
-            val_softmax_max_scores = []
-            val_softmax_preds = []
-            for i in range(len(threshset_eval_dict["zs_correct"][0])):
-                sample_probs = []
-                for c in range(num_classes):
-                    if len(threshset_eval_dict["out_mus_correct"][c]) > i:
-                        sample_probs.append(threshset_eval_dict["out_mus_correct"][c][i])
-                    else:
-                        sample_probs.append(0.0)
-                sample_probs_tensor = torch.tensor(sample_probs)
-                val_softmax_max_scores.append(sample_probs_tensor.max().item())
-                val_softmax_preds.append(int(sample_probs_tensor.argmax().item()))
-            best_f1 = -1
-            thresholds = np.arange(0.1, 1.001, 0.01)
-            for T in thresholds:
-                pred_osr = []
-                for score, label in zip(val_softmax_max_scores, val_softmax_preds):
-                    if score >= T:
-                        pred_osr.append(label)
-                    else:
-                        pred_osr.append(-1)
-                gt_bin = [0 if l < num_classes else 1 for l in val_labels]
-                pred_bin = [0 if l != -1 else 1 for l in pred_osr]
-                f1 = f1_score(gt_bin, pred_bin, zero_division=0)
-                if f1 > best_f1:
-                    best_f1 = f1
-                    best_threshold = T
-            logger.info(f"[SOFTMAX][OSR] Selected threshold on validation: {best_threshold:.2f} (best F1: {best_f1:.4f})")
-
-        # Áp dụng ngưỡng này lên openset
-        gt_labels = openset_dataset_eval_dict.get("labels", None)
-        if gt_labels is not None:
-            softmax_final_labels = []
-            for score, label in zip(softmax_max_scores, softmax_preds):
-                if score >= best_threshold:
-                    softmax_final_labels.append(label)
-                else:
-                    softmax_final_labels.append(-1)
-            softmax_label_dist = Counter(softmax_final_labels)
-            # Đánh giá OSR trên openset
-            gt_bin = [0 if l < num_classes else 1 for l in gt_labels]
-            pred_bin = [0 if l != -1 else 1 for l in softmax_final_labels]
-            acc = accuracy_score(gt_bin, pred_bin)
-            prec = precision_score(gt_bin, pred_bin, zero_division=0)
-            rec = recall_score(gt_bin, pred_bin, zero_division=0)
-            f1 = f1_score(gt_bin, pred_bin, zero_division=0)
-            cm = confusion_matrix(gt_bin, pred_bin)
-            logger.info(f"[SOFTMAX][OSR] {openset_datasets_names[od]} label distribution (top-1, threshold={best_threshold:.2f}, unknown=-1): {dict(softmax_label_dist)}")
-            logger.info(f"[SOFTMAX][OSR] {openset_datasets_names[od]} Accuracy: {acc:.4f}")
-            logger.info(f"[SOFTMAX][OSR] {openset_datasets_names[od]} Precision: {prec:.4f}")
-            logger.info(f"[SOFTMAX][OSR] {openset_datasets_names[od]} Recall: {rec:.4f}")
-            logger.info(f"[SOFTMAX][OSR] {openset_datasets_names[od]} F1: {f1:.4f}")
-            logger.info(f"[SOFTMAX][OSR] {openset_datasets_names[od]} Confusion matrix (rows=true, cols=pred):\n{cm}")
-
-        # --- [ADDED] SOFTMAX OSR EVALUATION WITH AUTO THRESHOLD SELECTION (0.5-1.0, step 0.01, best F1) ---
-        gt_labels = openset_dataset_eval_dict.get("labels", None)
-        if gt_labels is not None:
-            best_f1 = -1
-            best_threshold = 0.2
-            best_metrics = None
-            thresholds = np.arange(0.2, 1, 0.01)
-            for T in thresholds:
-                pred_osr = []
-                for score, label in zip(softmax_max_scores, softmax_preds):
-                    if score >= T:
-                        pred_osr.append(label)
-                    else:
-                        pred_osr.append(-1)  # -1 = unknown
-                # Binary: known (0), unknown (1)
-                gt_bin = [0 if l < num_classes else 1 for l in gt_labels]
-                pred_bin = [0 if l != -1 else 1 for l in pred_osr]
-                f1 = f1_score(gt_bin, pred_bin, zero_division=0)
-                if f1 > best_f1:
-                    best_f1 = f1
-                    best_threshold = T
-                    best_metrics = {
-                        'accuracy': accuracy_score(gt_bin, pred_bin),
-                        'precision': precision_score(gt_bin, pred_bin, zero_division=0),
-                        'recall': recall_score(gt_bin, pred_bin, zero_division=0),
-                        'f1': f1,
-                        'confusion_matrix': confusion_matrix(gt_bin, pred_bin)
-                    }
-            logger.info(f"[SOFTMAX][OSR] {openset_datasets_names[od]} Best threshold: {best_threshold:.2f}")
-            logger.info(f"[SOFTMAX][OSR] {openset_datasets_names[od]} Accuracy: {best_metrics['accuracy']:.4f}")
-            logger.info(f"[SOFTMAX][OSR] {openset_datasets_names[od]} Precision: {best_metrics['precision']:.4f}")
-            logger.info(f"[SOFTMAX][OSR] {openset_datasets_names[od]} Recall: {best_metrics['recall']:.4f}")
-            logger.info(f"[SOFTMAX][OSR] {openset_datasets_names[od]} F1: {best_metrics['f1']:.4f}")
-            logger.info(f"[SOFTMAX][OSR] {openset_datasets_names[od]} Confusion matrix (rows=true, cols=pred):\n{best_metrics['confusion_matrix']}")
+        # --- SOFTMAX BASELINE (MaxSoftmax thresholding) ---
+        openset_scores = np.array(openset_dataset_eval_dict.get("max_softmax_scores", []), dtype=np.float64)
+        if openset_scores.size > 0:
+            softmax_outlier_percentage = float(np.mean(openset_scores < softmax_threshold))
+            logger.info(f"{openset_datasets_names[od]} softmax outlier percentage: {softmax_outlier_percentage}")
         else:
-            logger.warning(f"[SOFTMAX][OSR] {openset_datasets_names[od]}: No ground-truth labels found in openset_dataset_eval_dict['labels'].")
+            softmax_outlier_percentage = None
+            logger.warning(f"{openset_datasets_names[od]} softmax outlier percentage: unavailable (missing max_softmax_scores)")
 
         # --- OPENMAX/EVT như cũ ---
         evt_rejects = []
@@ -559,6 +474,7 @@ def main():
         openset_outlier_probs_dict[openset_datasets_names[od]] = openset_outlier_probs
         openset_classification_dict[openset_datasets_names[od]] = openset_classification
         openset_entropy_classification_dict[openset_datasets_names[od]] = openset_entropy_classification
+        openset_softmax_outlier_percentage_dict[openset_datasets_names[od]] = softmax_outlier_percentage
         if args.calc_reconstruction:
             openset_recon_classification_dict[openset_datasets_names[od]] = openset_recon_classification_correct
 
@@ -573,6 +489,9 @@ def main():
         for other_data_name, other_data_dict in openset_recon_classification_dict.items():
             logger.info(other_data_name + ' reconstruction loss outlier percentage: ' +
                   str(other_data_dict["reconstruction_outlier_percentage"][recon_threshold_index]))
+
+    for other_data_name, softmax_outlier_percentage in openset_softmax_outlier_percentage_dict.items():
+        logger.info(other_data_name + ' softmax outlier percentage: ' + str(softmax_outlier_percentage))
 
     # joint prediction uncertainty plot for all datasets
     if args.var_samples > 1:
@@ -608,6 +527,11 @@ def main():
     visualize_openset_binary_confusion_matrix(dataset_eval_dict, openset_dataset_eval_dicts,
                                              outlier_probs_correct, openset_outlier_probs_dict,
                                              EVT_prior, args.dataset, num_classes, save_path)
+
+    visualize_openset_confusion_matrix_softmax(dataset_eval_dict, openset_dataset_eval_dicts,
+                                              softmax_threshold, args.dataset, num_classes, save_path)
+    visualize_openset_binary_confusion_matrix_softmax(dataset_eval_dict, openset_dataset_eval_dicts,
+                                                     softmax_threshold, args.dataset, save_path)
     logger.info("="*80)
 
     # histograms

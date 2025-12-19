@@ -74,6 +74,10 @@ def eval_dataset(model, data_loader, num_classes, device, samples=1, calc_recons
 
     recon_loss_mus = []
     recon_loss_sigmas = []
+
+    labels = []
+    preds = []
+    max_softmax_scores = []
     out_entropy = []
     out_mus_correct = []
     out_sigmas_correct = []
@@ -85,6 +89,10 @@ def eval_dataset(model, data_loader, num_classes, device, samples=1, calc_recons
     encoded_sigmas_false = []
     zs_correct = []
     zs_false = []
+
+    labels = []
+    preds = []
+    max_softmax_scores = []
 
     for i in range(num_classes):
         out_mus_correct.append([])
@@ -157,11 +165,15 @@ def eval_dataset(model, data_loader, num_classes, device, samples=1, calc_recons
             for i in range(inputs.size(0)):
                 tot_samples += 1
 
+                labels.append(classes[i].item())
+
                 if calc_reconstruction:
                     recon_loss_mus.append(recon_loss_mu[i].item())
                     recon_loss_sigmas.append(recon_loss_sigma[i].item())
 
                 idx = torch.argmax(out_mean[i]).item()
+                preds.append(idx)
+                max_softmax_scores.append(out_mean[i][idx].item())
                 if classes[i].item() != idx:
                     out_mus_false[idx].append(out_mean[i][idx].item())
                     out_sigmas_false[idx].append(out_std[i][idx].item())
@@ -197,7 +209,8 @@ def eval_dataset(model, data_loader, num_classes, device, samples=1, calc_recons
             "zs_correct": zs_correct, "zs_false": zs_false,
             "out_mus_correct": out_mus_correct, "out_sigmas_correct": out_sigmas_correct,
             "out_mus_false": out_mus_false, "out_sigmas_false": out_sigmas_false, "out_entropy": out_entropy,
-            "recon_loss_mus": recon_loss_mus, "recon_loss_sigmas": recon_loss_sigmas}
+            "recon_loss_mus": recon_loss_mus, "recon_loss_sigmas": recon_loss_sigmas,
+            "labels": labels, "preds": preds, "max_softmax_scores": max_softmax_scores}
 
 
 def eval_openset_dataset(model, data_loader, num_classes, device, samples=1,
@@ -304,6 +317,9 @@ def eval_openset_dataset(model, data_loader, num_classes, device, samples=1,
             # is unknown.
             for i in range(inputs.size(0)):
                 idx = torch.argmax(out_mean[i]).item()
+                labels.append(classes[i].item())
+                preds.append(idx)
+                max_softmax_scores.append(out_mean[i][idx].item())
                 out_mus[idx].append(out_mean[i][idx].item())
                 out_sigmas[idx].append(out_std[i][idx].item())
                 encoded_mus[idx].append(encoded_mu[i].data)
@@ -326,7 +342,8 @@ def eval_openset_dataset(model, data_loader, num_classes, device, samples=1,
     # Return a dictionary of stored values.
     return {"encoded_mus": encoded_mus, "encoded_sigmas": encoded_sigmas,
             "out_mus": out_mus, "out_sigmas": out_sigmas, "zs": zs, "out_entropy": out_entropy,
-            "recon_loss_mus": recon_loss_mus, "recon_loss_sigmas": recon_loss_sigmas}
+            "recon_loss_mus": recon_loss_mus, "recon_loss_sigmas": recon_loss_sigmas,
+            "labels": labels, "preds": preds, "max_softmax_scores": max_softmax_scores}
 
 
 def sample_per_class_zs(model, num_classes, num, device, use_new_z_bound, z_mean_bound):

@@ -1279,3 +1279,174 @@ def visualize_openset_binary_confusion_matrix(known_eval_dict, openset_eval_dict
     logger.info(f"  - Recall (open): {recall:.4f}, Precision (open): {precision:.4f}, F1 (open): {f1:.4f}")
 
 
+def visualize_openset_confusion_matrix_softmax(known_eval_dict, openset_eval_dicts,
+                                              softmax_threshold, known_dataset_name, num_classes, save_path):
+    logger = logging.getLogger()
+    logger.info(f"Creating Open-Set Recognition confusion matrices (Softmax)...")
+
+    matrix_size = num_classes + 1
+    confusion_matrix = np.zeros((matrix_size, matrix_size))
+
+    known_labels = known_eval_dict.get('labels', [])
+    known_preds = known_eval_dict.get('preds', [])
+    known_scores = known_eval_dict.get('max_softmax_scores', [])
+
+    n_known = min(len(known_labels), len(known_preds), len(known_scores))
+    for i in range(n_known):
+        true_label = int(known_labels[i])
+        pred_label = int(known_preds[i])
+        score = float(known_scores[i])
+        if score < softmax_threshold:
+            confusion_matrix[true_label, num_classes] += 1
+        else:
+            confusion_matrix[true_label, pred_label] += 1
+
+    for openset_name, openset_eval_dict in openset_eval_dicts.items():
+        openset_preds = openset_eval_dict.get('preds', [])
+        openset_scores = openset_eval_dict.get('max_softmax_scores', [])
+        n_open = min(len(openset_preds), len(openset_scores))
+        for i in range(n_open):
+            pred_label = int(openset_preds[i])
+            score = float(openset_scores[i])
+            if score < softmax_threshold:
+                confusion_matrix[num_classes, num_classes] += 1
+            else:
+                confusion_matrix[num_classes, pred_label] += 1
+
+    row_sums = confusion_matrix.sum(axis=1, keepdims=True)
+    row_sums[row_sums == 0] = 1
+    confusion_matrix_pct = (confusion_matrix / row_sums) * 100
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(40, 18))
+    class_names = [f'Class {i}' for i in range(num_classes)] + ['Unknown']
+
+    sns.heatmap(confusion_matrix, annot=True, fmt='.0f', cmap='Blues',
+                xticklabels=class_names, yticklabels=class_names,
+                ax=ax1, cbar_kws={'label': 'Count'},
+                linewidths=1, linecolor='gray')
+    ax1.set_xlabel('Predicted Label', fontsize=axes_font_size)
+    ax1.set_ylabel('True Label', fontsize=axes_font_size)
+    ax1.set_title(f'OSR Confusion Matrix - Softmax Baseline\n{known_dataset_name} vs Unknown\n(Raw Counts)',
+                  fontsize=title_font_size)
+    ax1.tick_params(labelsize=ticks_font_size-8, rotation=45)
+
+    sns.heatmap(confusion_matrix_pct, annot=True, fmt='.1f', cmap='RdYlGn',
+                xticklabels=class_names, yticklabels=class_names,
+                ax=ax2, cbar_kws={'label': 'Percentage (%)'},
+                linewidths=1, linecolor='gray', vmin=0, vmax=100)
+    ax2.set_xlabel('Predicted Label', fontsize=axes_font_size)
+    ax2.set_ylabel('True Label', fontsize=axes_font_size)
+    ax2.set_title(f'OSR Confusion Matrix - Softmax Baseline\n{known_dataset_name} vs Unknown\n(Percentages)',
+                  fontsize=title_font_size)
+    ax2.tick_params(labelsize=ticks_font_size-8, rotation=45)
+
+    known_correct = np.diag(confusion_matrix[:num_classes, :num_classes]).sum()
+    known_total = confusion_matrix[:num_classes, :].sum()
+    unknown_rejected = confusion_matrix[num_classes, num_classes]
+    unknown_total = confusion_matrix[num_classes, :].sum()
+
+    known_acc = (known_correct / known_total * 100) if known_total > 0 else 0
+    unknown_recall = (unknown_rejected / unknown_total * 100) if unknown_total > 0 else 0
+    fpr = ((confusion_matrix[:num_classes, num_classes].sum()) / known_total * 100) if known_total > 0 else 0
+
+    y_true = []
+    y_pred = []
+
+    for i in range(n_known):
+        y_true.append(0)
+        if float(known_scores[i]) < softmax_threshold:
+            y_pred.append(1)
+        else:
+            y_pred.append(0)
+
+    for openset_name, openset_eval_dict in openset_eval_dicts.items():
+        openset_scores = openset_eval_dict.get('max_softmax_scores', [])
+        for score in openset_scores:
+            y_true.append(1)
+            if float(score) < softmax_threshold:
+                y_pred.append(1)
+            else:
+                y_pred.append(0)
+
+    acc = accuracy_score(y_true, y_pred) if len(y_true) > 0 else 0
+    recall_open = recall_score(y_true, y_pred, pos_label=1) if len(y_true) > 0 else 0
+    precision_open = precision_score(y_true, y_pred, pos_label=1) if len(y_true) > 0 else 0
+    f1_open = f1_score(y_true, y_pred, pos_label=1) if len(y_true) > 0 else 0
+    recall_close = recall_score(y_true, y_pred, pos_label=0) if len(y_true) > 0 else 0
+    precision_close = precision_score(y_true, y_pred, pos_label=0) if len(y_true) > 0 else 0
+    f1_close = f1_score(y_true, y_pred, pos_label=0) if len(y_true) > 0 else 0
+
+    plt.tight_layout(rect=[0, 0.05, 1, 1])
+    save_file = os.path.join(save_path, f'{known_dataset_name}_OSR_confusion_Softmax.png')
+    plt.savefig(save_file, dpi=150, bbox_inches='tight')
+    plt.close(fig)
+
+    logger.info(f"✓ OSR confusion matrix (Softmax) saved: {save_file}")
+    logger.info(f"  Known accuracy (per-class): {known_acc:.2f}%")
+    logger.info(f"  Unknown detection (TPR): {unknown_recall:.2f}%")
+    logger.info(f"  False Positive Rate: {fpr:.2f}%")
+    logger.info(f"  [Binary metrics]")
+    logger.info(f"    Accuracy: {acc:.4f}")
+    logger.info(f"    Recall (open): {recall_open:.4f}, Precision (open): {precision_open:.4f}, F1 (open): {f1_open:.4f}")
+    logger.info(f"    Recall (close): {recall_close:.4f}, Precision (close): {precision_close:.4f}, F1 (close): {f1_close:.4f}")
+
+
+def visualize_openset_binary_confusion_matrix_softmax(known_eval_dict, openset_eval_dicts,
+                                                     softmax_threshold, known_dataset_name, save_path):
+    logger = logging.getLogger()
+    logger.info(f"[visualize_openset_binary_confusion_matrix] Drawing 2x2 close/open confusion matrix (Softmax)...")
+
+    y_true = []
+    y_pred = []
+
+    known_scores = known_eval_dict.get('max_softmax_scores', [])
+    for score in known_scores:
+        y_true.append(0)
+        if float(score) < softmax_threshold:
+            y_pred.append(1)
+        else:
+            y_pred.append(0)
+
+    for openset_name, openset_eval_dict in openset_eval_dicts.items():
+        openset_scores = openset_eval_dict.get('max_softmax_scores', [])
+        for score in openset_scores:
+            y_true.append(1)
+            if float(score) < softmax_threshold:
+                y_pred.append(1)
+            else:
+                y_pred.append(0)
+
+    cm = confusion_matrix(y_true, y_pred, labels=[0, 1]) if len(y_true) > 0 else np.zeros((2, 2), dtype=int)
+    acc = accuracy_score(y_true, y_pred) if len(y_true) > 0 else 0
+    recall = recall_score(y_true, y_pred, pos_label=1) if len(y_true) > 0 else 0
+    precision = precision_score(y_true, y_pred, pos_label=1) if len(y_true) > 0 else 0
+    f1 = f1_score(y_true, y_pred, pos_label=1) if len(y_true) > 0 else 0
+
+    logger.info(f"[visualize_openset_binary_confusion_matrix] Confusion matrix (rows=true, cols=pred):\n{cm}")
+    logger.info(f"[visualize_openset_binary_confusion_matrix] Accuracy: {acc:.4f}")
+    logger.info(f"[visualize_openset_binary_confusion_matrix] Recall: {recall:.4f}, Precision: {precision:.4f}, F1: {f1:.4f}")
+
+    fig, ax = plt.subplots(figsize=(8, 7))
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
+                xticklabels=['Close', 'Open'], yticklabels=['Close', 'Open'],
+                ax=ax, cbar_kws={'label': 'Count'}, linewidths=1, linecolor='gray')
+    ax.set_xlabel('Predicted Label', fontsize=16)
+    ax.set_ylabel('True Label', fontsize=16)
+    ax.set_title(f'OSR 2x2 Confusion Matrix (Softmax)\n{known_dataset_name} (Close vs Open)', fontsize=18)
+
+    stats_text = (f"Accuracy: {acc:.2%}\n"
+                  f"Recall: {recall:.2%}\n"
+                  f"Precision: {precision:.2%}\n"
+                  f"F1: {f1:.2%}")
+    plt.gcf().text(0.99, 0.01, stats_text, fontsize=13, ha='right', va='bottom', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+
+    plt.tight_layout(rect=[0, 0.05, 1, 1])
+    save_file = os.path.join(save_path, f'{known_dataset_name}_OSR_confusion_Softmax_binary.png')
+    plt.savefig(save_file, dpi=150, bbox_inches='tight')
+    plt.close(fig)
+    logger.info(f"Confusion matrix:\n{cm.tolist()}")
+    logger.info(f"✓ OSR 2x2 confusion matrix (Softmax) saved: {save_file}")
+    logger.info(f"  - Accuracy: {acc:.4f}")
+    logger.info(f"  - Recall (open): {recall:.4f}, Precision (open): {precision:.4f}, F1 (open): {f1:.4f}")
+
+
